@@ -19,6 +19,7 @@ package ffnet
 import (
 	"context"
 	"net"
+	"slices"
 	"testing"
 
 	"github.com/hyperledger/firefly-common/pkg/config"
@@ -34,62 +35,88 @@ func resetConf() {
 	InitConfig(utConf)
 }
 
-func TestNewDialControlDefaults(t *testing.T) {
-	// nil CIDRDenylist => secure defaults
+func TestNewDialControlEmptyByDefault(t *testing.T) {
+	// No denylist configured => no egress restriction at all
 	control, err := NewDialControl(context.Background(), &Config{})
+	require.NoError(t, err)
+	assert.Nil(t, control)
+}
+
+func TestNewDialControlSSRFDenylist(t *testing.T) {
+	// The recommended denylist blocks every reserved/internal category
+	control, err := NewDialControl(context.Background(), &Config{CIDRDenylist: SSRFDenylist})
 	require.NoError(t, err)
 	require.NotNil(t, control)
 
-	// Blocked by default: loopback, link-local/cloud-metadata, unspecified, multicast/reserved
-	assert.Error(t, control("tcp", "127.0.0.1:8080", nil))
+	assert.Error(t, control("tcp", "127.0.0.1:8080", nil))     // loopback
 	assert.Error(t, control("tcp", "169.254.169.254:80", nil)) // cloud metadata
-	assert.Error(t, control("tcp", "0.0.0.0:80", nil))
-	assert.Error(t, control("tcp", "[::1]:443", nil))
+	assert.Error(t, control("tcp", "0.0.0.0:80", nil))         // unspecified
+	assert.Error(t, control("tcp", "[::1]:443", nil))          // IPv6 loopback
 	assert.Error(t, control("tcp", "[fd00:ec2::254]:80", nil)) // AWS IMDS IPv6
 	assert.Error(t, control("tcp", "224.0.0.1:80", nil))       // IPv4 multicast
 	assert.Error(t, control("tcp", "255.255.255.255:80", nil)) // IPv4 broadcast (reserved)
 	assert.Error(t, control("tcp", "240.0.0.1:80", nil))       // IPv4 reserved
 	assert.Error(t, control("tcp", "[ff02::1]:80", nil))       // IPv6 multicast
+	assert.Error(t, control("tcp", "10.1.2.3:80", nil))        // RFC1918 private
+	assert.Error(t, control("tcp", "192.168.1.5:80", nil))     // RFC1918 private
+	assert.Error(t, control("tcp", "100.64.1.1:80", nil))      // CGNAT
+	assert.Error(t, control("tcp", "[fc00::1]:80", nil))       // IPv6 ULA
 
-	// NOT blocked by default: public, and private RFC1918 (deferred to firewalls)
+	// Public addresses still allowed
 	assert.NoError(t, control("tcp", "8.8.8.8:443", nil))
-	assert.NoError(t, control("tcp", "10.1.2.3:80", nil))
-	assert.NoError(t, control("tcp", "192.168.1.5:80", nil))
 
 	// IPv4-mapped IPv6 loopback is normalized and still blocked
 	assert.Error(t, control("tcp", "[::ffff:127.0.0.1]:80", nil))
 }
 
+func TestNewDialControlInternalComposition(t *testing.T) {
+	// An internal client can compose a narrower denylist that still reaches private ranges but
+	// blocks loopback, link-local/cloud-metadata and multicast.
+	denylist := slices.Concat(LoopbackCIDRs, LinkLocalCIDRs, MulticastCIDRs)
+	control, err := NewDialControl(context.Background(), &Config{CIDRDenylist: denylist})
+	require.NoError(t, err)
+	require.NotNil(t, control)
+
+	assert.Error(t, control("tcp", "127.0.0.1:80", nil))       // loopback blocked
+	assert.Error(t, control("tcp", "169.254.169.254:80", nil)) // metadata blocked
+	assert.Error(t, control("tcp", "[fd00:ec2::254]:80", nil)) // IMDS IPv6 blocked
+	assert.NoError(t, control("tcp", "10.1.2.3:80", nil))      // private still reachable
+	assert.NoError(t, control("tcp", "192.168.1.5:80", nil))   // private still reachable
+}
+
+func TestNewDialControlCloudMetadataOnly(t *testing.T) {
+	// The minimal protection: block only the cloud metadata endpoints
+	control, err := NewDialControl(context.Background(), &Config{CIDRDenylist: CloudMetadataCIDRs})
+	require.NoError(t, err)
+	require.NotNil(t, control)
+
+	assert.Error(t, control("tcp", "169.254.169.254:80", nil)) // metadata blocked
+	assert.Error(t, control("tcp", "[fd00:ec2::254]:80", nil)) // IMDS IPv6 blocked
+	assert.NoError(t, control("tcp", "127.0.0.1:80", nil))     // loopback reachable
+	assert.NoError(t, control("tcp", "169.254.1.1:80", nil))   // other link-local reachable
+}
+
 func TestNewDialControlOverride(t *testing.T) {
-	// Explicit empty override disables denylisting entirely
+	// Explicit empty list disables denylisting entirely
 	control, err := NewDialControl(context.Background(), &Config{CIDRDenylist: []string{}})
 	require.NoError(t, err)
 	assert.Nil(t, control)
 
-	// Custom override fully replaces defaults
-	control, err = NewDialControl(context.Background(), &Config{CIDRDenylist: []string{"10.0.0.0/8"}})
+	// A custom list is used exactly as given
+	control, err = NewDialControl(context.Background(), &Config{CIDRDenylist: IPv4Private})
 	require.NoError(t, err)
 	require.NotNil(t, control)
-	assert.Error(t, control("tcp", "10.1.2.3:80", nil))    // now blocked
-	assert.NoError(t, control("tcp", "127.0.0.1:80", nil)) // defaults no longer apply
-}
-
-func TestNewDialControlAdditional(t *testing.T) {
-	// Additional CIDRs extend the defaults
-	control, err := NewDialControl(context.Background(), &Config{AdditionalDeniedCIDRs: []string{"10.0.0.0/8"}})
-	require.NoError(t, err)
-	require.NotNil(t, control)
-	assert.Error(t, control("tcp", "10.1.2.3:80", nil))  // added
-	assert.Error(t, control("tcp", "127.0.0.1:80", nil)) // default still applies
+	assert.Error(t, control("tcp", "10.1.2.3:80", nil))    // in list
+	assert.NoError(t, control("tcp", "127.0.0.1:80", nil)) // not in list
 }
 
 func TestNewDialControlInvalidCIDR(t *testing.T) {
-	_, err := NewDialControl(context.Background(), &Config{AdditionalDeniedCIDRs: []string{"not-a-cidr"}})
+	_, err := NewDialControl(context.Background(), &Config{CIDRDenylist: []string{"not-a-cidr"}})
 	assert.Regexp(t, "FF00260", err)
 }
 
 func TestDialControlBlocksUnparseableAddress(t *testing.T) {
-	control, err := NewDialControl(context.Background(), &Config{})
+	control, err := NewDialControl(context.Background(), &Config{CIDRDenylist: SSRFDenylist})
 	require.NoError(t, err)
 	// Fail closed if an address somehow isn't a resolved IP literal
 	assert.Regexp(t, "FF00261", control("tcp", "not-an-ip:80", nil))
@@ -97,7 +124,7 @@ func TestDialControlBlocksUnparseableAddress(t *testing.T) {
 
 func TestDialControlBareIPNoPort(t *testing.T) {
 	// Addresses without a port still resolve their IP (SplitHostPort error fallback)
-	control, err := NewDialControl(context.Background(), &Config{})
+	control, err := NewDialControl(context.Background(), &Config{CIDRDenylist: SSRFDenylist})
 	require.NoError(t, err)
 	assert.Error(t, control("tcp", "127.0.0.1", nil))       // blocked
 	assert.NoError(t, control("tcp", "8.8.8.8", nil))       // allowed
@@ -106,7 +133,7 @@ func TestDialControlBareIPNoPort(t *testing.T) {
 
 func TestNewDialerEndToEndBlocks(t *testing.T) {
 	// The guard fires through a real net.Dialer dial, before any connection is made
-	d, err := NewDialer(context.Background(), &Config{})
+	d, err := NewDialer(context.Background(), &Config{CIDRDenylist: LoopbackCIDRs})
 	require.NoError(t, err)
 	require.NotNil(t, d.Control)
 	_, err = d.DialContext(context.Background(), "tcp", "127.0.0.1:1")
@@ -133,72 +160,60 @@ func TestNewDialerAllowsAndConnects(t *testing.T) {
 	_ = conn.Close()
 }
 
-func TestGenerateConfigOverrideReplacesDefaults(t *testing.T) {
+func TestGenerateConfigDenylistFromConfig(t *testing.T) {
 	resetConf()
-	utConf.Set(CIDRDenylist, []string{"10.0.0.0/8"})
+	utConf.Set(CIDRDenylist, IPv4Private)
 	cfg, err := GenerateConfig(utConf)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"10.0.0.0/8"}, cfg.CIDRDenylist)
+	assert.Equal(t, IPv4Private, cfg.CIDRDenylist)
 
 	control, err := NewDialControl(context.Background(), cfg)
 	require.NoError(t, err)
 	require.NotNil(t, control)
-	assert.Error(t, control("tcp", "10.1.2.3:80", nil))    // override entry blocked
-	assert.NoError(t, control("tcp", "127.0.0.1:80", nil)) // defaults replaced, loopback allowed
+	assert.Error(t, control("tcp", "10.1.2.3:80", nil))    // configured entry blocked
+	assert.NoError(t, control("tcp", "127.0.0.1:80", nil)) // loopback not in the configured list
 }
 
 func TestNewDialer(t *testing.T) {
-	// Default config => dialer with the SSRF guard wired (resolver nil since no DNS servers)
-	d, err := NewDialer(context.Background(), &Config{})
+	// SSRF denylist => dialer with the egress guard wired (resolver nil since no DNS servers)
+	d, err := NewDialer(context.Background(), &Config{CIDRDenylist: SSRFDenylist})
 	require.NoError(t, err)
 	require.NotNil(t, d)
 	assert.Nil(t, d.Resolver)
 	require.NotNil(t, d.Control)
 	assert.Error(t, d.Control("tcp", "127.0.0.1:80", nil))
 
-	// DNS servers => resolver attached; empty denylist => no control
+	// DNS servers => resolver attached; no denylist => no control
 	d, err = NewDialer(context.Background(), &Config{
-		DNS:          ffdns.Config{Servers: []string{"8.8.8.8"}},
-		CIDRDenylist: []string{},
+		DNS: ffdns.Config{Servers: []string{"8.8.8.8"}},
 	})
 	require.NoError(t, err)
 	require.NotNil(t, d.Resolver)
 	assert.Nil(t, d.Control)
 
 	// Invalid CIDR propagates as an error
-	_, err = NewDialer(context.Background(), &Config{AdditionalDeniedCIDRs: []string{"bad"}})
+	_, err = NewDialer(context.Background(), &Config{CIDRDenylist: []string{"bad"}})
 	assert.Regexp(t, "FF00260", err)
 }
 
 func TestGenerateConfigDenylistSemantics(t *testing.T) {
-	// Unset cidrDenylist => defaults active (control blocks loopback)
+	// Unset cidrDenylist => empty, no guard
 	resetConf()
 	cfg, err := GenerateConfig(utConf)
 	require.NoError(t, err)
-	assert.Nil(t, cfg.CIDRDenylist)
+	assert.Empty(t, cfg.CIDRDenylist)
 	control, err := NewDialControl(context.Background(), cfg)
+	require.NoError(t, err)
+	assert.Nil(t, control)
+
+	// Configured denylist => guard active
+	resetConf()
+	utConf.Set(CIDRDenylist, SSRFDenylist)
+	cfg, err = GenerateConfig(utConf)
+	require.NoError(t, err)
+	assert.NotEmpty(t, cfg.CIDRDenylist)
+	control, err = NewDialControl(context.Background(), cfg)
 	require.NoError(t, err)
 	require.NotNil(t, control)
 	assert.Error(t, control("tcp", "127.0.0.1:80", nil))
-
-	// Explicitly-set empty cidrDenylist => disabled
-	resetConf()
-	utConf.Set(CIDRDenylist, []string{})
-	cfg, err = GenerateConfig(utConf)
-	require.NoError(t, err)
-	assert.NotNil(t, cfg.CIDRDenylist)
-	control, err = NewDialControl(context.Background(), cfg)
-	require.NoError(t, err)
-	assert.Nil(t, control)
-}
-
-func TestGenerateConfigDNSAndAdditional(t *testing.T) {
-	resetConf()
-	utConf.Set(ffdns.DNSServers, []string{"8.8.8.8"})
-	utConf.Set(AdditionalDeniedCIDRs, []string{"10.0.0.0/8"})
-	cfg, err := GenerateConfig(utConf)
-	require.NoError(t, err)
-	assert.Equal(t, []string{"8.8.8.8"}, cfg.DNS.Servers)
-	assert.Equal(t, []string{"10.0.0.0/8"}, cfg.AdditionalDeniedCIDRs)
-	assert.NotNil(t, cfg.Resolver())
 }

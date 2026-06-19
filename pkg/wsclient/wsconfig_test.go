@@ -76,34 +76,25 @@ func TestWSConfigNetDialerDefaults(t *testing.T) {
 	wsConfig, err := GenerateConfig(ctx, utConf)
 	require.NoError(t, err)
 
-	// SSRF egress guard wired by default; no DNS servers => system resolver
+	// No egress denylist or DNS servers configured by default => no guard, system resolver
 	require.NotNil(t, wsConfig.NetDialer)
 	assert.Nil(t, wsConfig.NetDialer.Resolver)
-	require.NotNil(t, wsConfig.NetDialer.Control)
-	assert.Error(t, wsConfig.NetDialer.Control("tcp", "169.254.169.254:80", nil))
+	assert.Nil(t, wsConfig.NetDialer.Control)
 	assert.Equal(t, defaultConnectionTimeout, wsConfig.NetDialer.Timeout)
 }
 
 func TestWSConfigNetDialerCustom(t *testing.T) {
 	resetConf()
 	utConf.SubSection("net").Set(ffdns.DNSServers, []string{"8.8.8.8"})
-	utConf.SubSection("net").Set(ffnet.CIDRDenylist, []string{}) // disable the guard
+	utConf.SubSection("net").Set(ffnet.CIDRDenylist, ffnet.SSRFDenylist) // opt in to the egress guard
 
 	ctx := context.Background()
 	wsConfig, err := GenerateConfig(ctx, utConf)
 	require.NoError(t, err)
 	require.NotNil(t, wsConfig.NetDialer)
 	assert.NotNil(t, wsConfig.NetDialer.Resolver) // custom DNS servers
-	assert.Nil(t, wsConfig.NetDialer.Control)     // denylist disabled
-}
-
-func TestWSConfigNetDialerInvalidCIDR(t *testing.T) {
-	resetConf()
-	utConf.SubSection("net").Set(ffnet.AdditionalDeniedCIDRs, []string{"not-a-cidr"})
-
-	ctx := context.Background()
-	_, err := GenerateConfig(ctx, utConf)
-	assert.Regexp(t, "FF00260", err)
+	require.NotNil(t, wsConfig.NetDialer.Control) // denylist active
+	assert.Error(t, wsConfig.NetDialer.Control("tcp", "169.254.169.254:80", nil))
 }
 
 func TestWSConfigTLSGenerationFail(t *testing.T) {

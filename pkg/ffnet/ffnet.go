@@ -45,22 +45,12 @@ func NewDialer(ctx context.Context, cfg *Config) (*net.Dialer, error) {
 	}, nil
 }
 
-// effectiveDenylist resolves the base denylist (the configured override, or the secure
-// defaults when unset) and appends any additional CIDRs.
-func effectiveDenylist(cfg *Config) []string {
-	base := cfg.CIDRDenylist
-	if base == nil {
-		base = DefaultDeniedCIDRs
-	}
-	return append(append([]string{}, base...), cfg.AdditionalDeniedCIDRs...)
-}
-
 // NewDialControl builds a net.Dialer Control function that rejects connections to any address
 // inside the effective CIDR denylist — the core SSRF mitigation. It runs after DNS resolution
 // against the actual resolved IP, so it also defeats DNS-rebinding and literal-IP bypasses.
 // Returns (nil, nil) when the effective denylist is empty (no restrictions).
 func NewDialControl(ctx context.Context, cfg *Config) (func(network, address string, c syscall.RawConn) error, error) {
-	entries := effectiveDenylist(cfg)
+	entries := cfg.CIDRDenylist
 	if len(entries) == 0 {
 		return nil, nil
 	}

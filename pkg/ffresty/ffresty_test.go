@@ -688,8 +688,6 @@ func TestMTLSClientWithServer(t *testing.T) {
 	var restyConfig = config.RootSection("resty")
 	InitConfig(restyConfig)
 	clientTLSSection := restyConfig.SubSection("tls")
-	// This test connects to a loopback server, which the default SSRF denylist blocks; opt out.
-	restyConfig.SubSection("net").Set(ffnet.CIDRDenylist, []string{})
 	restyConfig.Set(HTTPConfigURL, ln.Addr()) // note this does not have https:// in the URL
 	clientTLSSection.Set(fftls.HTTPConfTLSEnabled, true)
 	clientTLSSection.Set(fftls.HTTPConfTLSKeyFile, privateKeyFile.Name())
@@ -837,9 +835,10 @@ func TestNewWithConfigResolverWired(t *testing.T) {
 	assert.NotNil(t, transport.DialContext)
 }
 
-func TestDialControlBlocksLoopbackByDefault(t *testing.T) {
-	// A client built from default config blocks SSRF to loopback before connecting
+func TestDialControlBlocksLoopbackWhenConfigured(t *testing.T) {
+	// With an SSRF denylist configured, the client blocks loopback before connecting
 	resetConf()
+	utConf.SubSection("net").Set(ffnet.CIDRDenylist, ffnet.SSRFDenylist)
 	utConf.Set(HTTPConfigURL, "http://127.0.0.1:1")
 	c, err := New(context.Background(), utConf)
 	require.NoError(t, err)

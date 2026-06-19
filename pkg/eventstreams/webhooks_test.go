@@ -26,7 +26,6 @@ import (
 	"testing"
 
 	"github.com/hyperledger/firefly-common/pkg/ffapi"
-	"github.com/hyperledger/firefly-common/pkg/ffnet"
 	"github.com/hyperledger/firefly-common/pkg/ffresty"
 	"github.com/hyperledger/firefly-common/pkg/fftls"
 	"github.com/hyperledger/firefly-common/pkg/wsserver"
@@ -190,9 +189,6 @@ func TestWebhooksTLS(t *testing.T) {
 		URL:           &u,
 		TLSConfigName: &tlsConfName,
 	}, func() {
-		// The test server listens on loopback, which the default SSRF egress denylist blocks;
-		// disable it for this webhook client so the delivery can reach the local server.
-		WebhookDefaultsConfig.SubSection("net").Set(ffnet.CIDRDenylist, []string{})
 		tls0 := TLSConfigs.ArrayEntry(0)
 		tls0.Set(ConfigTLSConfigName, tlsConfName)
 		tlsConf := tls0.SubSection("tls")

@@ -221,7 +221,7 @@ func NewWithConfig(ctx context.Context, ffrestyConfig Config) (client *resty.Cli
 		if ffrestyConfig.Resolver != nil {
 			dialer.Resolver = ffrestyConfig.Resolver
 		}
-		// SSRF CIDR-denylist guard, checked against the resolved IP just before connect.
+		// CIDR-denylist guard for SSRF and/or high-trust, checked against the resolved IP just before connect.
 		if ffrestyConfig.DialControl != nil {
 			dialer.Control = ffrestyConfig.DialControl
 		}
