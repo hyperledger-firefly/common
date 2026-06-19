@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/hyperledger/firefly-common/pkg/ffdns"
 	"github.com/hyperledger/firefly-common/pkg/fftls"
 	"github.com/hyperledger/firefly-common/pkg/fftypes"
 	"github.com/stretchr/testify/assert"
@@ -47,7 +48,7 @@ func TestWSConfigGeneration(t *testing.T) {
 	utConf.Set(HTTPTLSHandshakeTimeout, 1)
 	utConf.Set(HTTPExpectContinueTimeout, 1)
 	utConf.Set(HTTPPassthroughHeadersEnabled, true)
-	utConf.Set(HTTPDNSServers, []string{"8.8.8.8", "1.1.1.1:53"})
+	utConf.SubSection("net").Set(ffdns.DNSServers, []string{"8.8.8.8", "1.1.1.1:53"})
 
 	ctx := context.Background()
 	config, err := GenerateConfig(ctx, utConf)
@@ -69,7 +70,8 @@ func TestWSConfigGeneration(t *testing.T) {
 	assert.Equal(t, fftypes.FFDuration(1000000), config.HTTPConnectionTimeout)
 	assert.Equal(t, 1, config.HTTPMaxIdleConns)
 	assert.Equal(t, "custom value", config.HTTPHeaders.GetString("custom-header"))
-	assert.Equal(t, []string{"8.8.8.8", "1.1.1.1:53"}, config.DNSServers)
+	// dns.servers drives a programmatic resolver built via ffdns
+	assert.NotNil(t, config.Resolver)
 }
 
 func TestWSConfigTLSGenerationFail(t *testing.T) {

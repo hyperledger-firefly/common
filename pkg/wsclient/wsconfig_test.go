@@ -6,9 +6,12 @@ import (
 	"time"
 
 	"github.com/hyperledger/firefly-common/pkg/config"
+	"github.com/hyperledger/firefly-common/pkg/ffdns"
+	"github.com/hyperledger/firefly-common/pkg/ffnet"
 	"github.com/hyperledger/firefly-common/pkg/ffresty"
 	"github.com/hyperledger/firefly-common/pkg/fftls"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 var utConf = config.RootSection("ws")
@@ -64,6 +67,43 @@ func TestWSConfigGenerationDefaults(t *testing.T) {
 	assert.Equal(t, defaultInitialConnectAttempts, wsConfig.InitialConnectAttempts)
 	assert.False(t, wsConfig.BackgroundConnect)
 	assert.Equal(t, 30*time.Second, wsConfig.HeartbeatInterval)
+}
+
+func TestWSConfigNetDialerDefaults(t *testing.T) {
+	resetConf()
+
+	ctx := context.Background()
+	wsConfig, err := GenerateConfig(ctx, utConf)
+	require.NoError(t, err)
+
+	// SSRF egress guard wired by default; no DNS servers => system resolver
+	require.NotNil(t, wsConfig.NetDialer)
+	assert.Nil(t, wsConfig.NetDialer.Resolver)
+	require.NotNil(t, wsConfig.NetDialer.Control)
+	assert.Error(t, wsConfig.NetDialer.Control("tcp", "169.254.169.254:80", nil))
+	assert.Equal(t, defaultConnectionTimeout, wsConfig.NetDialer.Timeout)
+}
+
+func TestWSConfigNetDialerCustom(t *testing.T) {
+	resetConf()
+	utConf.SubSection("net").Set(ffdns.DNSServers, []string{"8.8.8.8"})
+	utConf.SubSection("net").Set(ffnet.CIDRDenylist, []string{}) // disable the guard
+
+	ctx := context.Background()
+	wsConfig, err := GenerateConfig(ctx, utConf)
+	require.NoError(t, err)
+	require.NotNil(t, wsConfig.NetDialer)
+	assert.NotNil(t, wsConfig.NetDialer.Resolver) // custom DNS servers
+	assert.Nil(t, wsConfig.NetDialer.Control)     // denylist disabled
+}
+
+func TestWSConfigNetDialerInvalidCIDR(t *testing.T) {
+	resetConf()
+	utConf.SubSection("net").Set(ffnet.AdditionalDeniedCIDRs, []string{"not-a-cidr"})
+
+	ctx := context.Background()
+	_, err := GenerateConfig(ctx, utConf)
+	assert.Regexp(t, "FF00260", err)
 }
 
 func TestWSConfigTLSGenerationFail(t *testing.T) {

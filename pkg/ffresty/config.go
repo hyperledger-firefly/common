@@ -1,4 +1,4 @@
-// Copyright © 2024 Kaleido, Inc.
+// Copyright © 2026 Kaleido, Inc.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -20,6 +20,7 @@ import (
 	"context"
 
 	"github.com/hyperledger/firefly-common/pkg/config"
+	"github.com/hyperledger/firefly-common/pkg/ffnet"
 	"github.com/hyperledger/firefly-common/pkg/fftls"
 	"github.com/hyperledger/firefly-common/pkg/fftypes"
 )
@@ -81,10 +82,6 @@ const (
 	// HTTPMaxIdleConnsPerHost the max number of idle connections per host
 	HTTPMaxIdleConnsPerHost = "maxIdleConnsPerHost"
 
-	// HTTPDNSServers an optional list of DNS server addresses (host or host:port, port defaults to 53) to use for
-	// name resolution. Setting this forces use of Go's built-in DNS resolver rather than the system resolver.
-	HTTPDNSServers = "dnsServers"
-
 	// HTTPConnectionTimeout the connection timeout for new connections
 	HTTPConnectionTimeout = "connectionTimeout"
 	// HTTPTLSHandshakeTimeout the TLS handshake connection timeout
@@ -116,7 +113,6 @@ func InitConfig(conf config.Section) {
 	conf.AddKnownKey(HTTPMaxIdleConns, defaultHTTPMaxIdleConns)
 	conf.AddKnownKey(HTTPMaxConnsPerHost, defaultHTTPMaxConnsPerHost)
 	conf.AddKnownKey(HTTPMaxIdleConnsPerHost, defaultHTTPMaxIdleConnsPerHost)
-	conf.AddKnownKey(HTTPDNSServers)
 	conf.AddKnownKey(HTTPConnectionTimeout, defaultHTTPConnectionTimeout)
 	conf.AddKnownKey(HTTPTLSHandshakeTimeout, defaultHTTPTLSHandshakeTimeout)
 	conf.AddKnownKey(HTTPExpectContinueTimeout, defaultHTTPExpectContinueTimeout)
@@ -125,6 +121,9 @@ func InitConfig(conf config.Section) {
 
 	tlsConfig := conf.SubSection("tls")
 	fftls.InitTLSConfig(tlsConfig)
+
+	netConfig := conf.SubSection("net")
+	ffnet.InitConfig(netConfig)
 }
 
 func GenerateConfig(ctx context.Context, conf config.Section) (*Config, error) {
@@ -147,7 +146,6 @@ func GenerateConfig(ctx context.Context, conf config.Section) (*Config, error) {
 			HTTPMaxIdleConns:              conf.GetInt(HTTPMaxIdleConns),
 			HTTPMaxConnsPerHost:           conf.GetInt(HTTPMaxConnsPerHost),
 			HTTPMaxIdleConnsPerHost:       conf.GetInt(HTTPMaxIdleConnsPerHost),
-			DNSServers:                    conf.GetStringSlice(HTTPDNSServers),
 			HTTPConnectionTimeout:         fftypes.FFDuration(conf.GetDuration(HTTPConnectionTimeout)),
 			HTTPTLSHandshakeTimeout:       fftypes.FFDuration(conf.GetDuration(HTTPTLSHandshakeTimeout)),
 			HTTPExpectContinueTimeout:     fftypes.FFDuration(conf.GetDuration(HTTPExpectContinueTimeout)),
@@ -162,6 +160,17 @@ func GenerateConfig(ctx context.Context, conf config.Section) (*Config, error) {
 	}
 
 	ffrestyConfig.TLSClientConfig = tlsClientConfig
+
+	netCfg, err := ffnet.GenerateConfig(conf.SubSection("net"))
+	if err != nil {
+		return nil, err
+	}
+	ffrestyConfig.Resolver = netCfg.Resolver()
+	dialControl, err := ffnet.NewDialControl(ctx, netCfg)
+	if err != nil {
+		return nil, err
+	}
+	ffrestyConfig.DialControl = dialControl
 
 	return ffrestyConfig, nil
 }

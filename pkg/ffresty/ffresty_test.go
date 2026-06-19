@@ -42,8 +42,9 @@ import (
 	"github.com/go-resty/resty/v2"
 	"github.com/hyperledger/firefly-common/pkg/config"
 	"github.com/hyperledger/firefly-common/pkg/ffapi"
+	"github.com/hyperledger/firefly-common/pkg/ffdns"
+	"github.com/hyperledger/firefly-common/pkg/ffnet"
 	"github.com/hyperledger/firefly-common/pkg/fftls"
-	"github.com/hyperledger/firefly-common/pkg/fftypes"
 	"github.com/hyperledger/firefly-common/pkg/i18n"
 	"github.com/hyperledger/firefly-common/pkg/metric"
 	"github.com/sirupsen/logrus"
@@ -687,6 +688,8 @@ func TestMTLSClientWithServer(t *testing.T) {
 	var restyConfig = config.RootSection("resty")
 	InitConfig(restyConfig)
 	clientTLSSection := restyConfig.SubSection("tls")
+	// This test connects to a loopback server, which the default SSRF denylist blocks; opt out.
+	restyConfig.SubSection("net").Set(ffnet.CIDRDenylist, []string{})
 	restyConfig.Set(HTTPConfigURL, ln.Addr()) // note this does not have https:// in the URL
 	clientTLSSection.Set(fftls.HTTPConfTLSEnabled, true)
 	clientTLSSection.Set(fftls.HTTPConfTLSKeyFile, privateKeyFile.Name())
@@ -821,82 +824,40 @@ func TestTrace(t *testing.T) {
 	require.Equal(t, `(binary reader)`, traceBody(strings.NewReader("data to stream")))
 }
 
-func TestWithDefaultDNSPort(t *testing.T) {
-	assert.Equal(t, "8.8.8.8:53", withDefaultDNSPort("8.8.8.8"))
-	assert.Equal(t, "8.8.8.8:5353", withDefaultDNSPort("8.8.8.8:5353"))
-	assert.Equal(t, "[2001:db8::1]:53", withDefaultDNSPort("2001:db8::1"))
-	assert.Equal(t, "[2001:db8::1]:5353", withDefaultDNSPort("[2001:db8::1]:5353"))
-}
-
-func TestDNSResolverPrecedence(t *testing.T) {
-	// Nothing configured -> leave Go's default system resolver selection in place
-	assert.Nil(t, dnsResolver(&Config{}))
-
-	// Programmatic resolver always wins
-	custom := &net.Resolver{}
-	assert.Same(t, custom, dnsResolver(&Config{HTTPConfig: HTTPConfig{
-		Resolver:   custom,
-		DNSServers: []string{"8.8.8.8"},
-	}}))
-
-	// DNSServers builds a pure-Go resolver
-	r := dnsResolver(&Config{HTTPConfig: HTTPConfig{DNSServers: []string{"8.8.8.8"}}})
-	require.NotNil(t, r)
-	assert.True(t, r.PreferGo)
-	assert.NotNil(t, r.Dial)
-}
-
-func TestDNSResolverDialFailover(t *testing.T) {
-	// Stand up a listener acting as the "good" DNS server
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	defer ln.Close()
-
-	accepted := make(chan struct{}, 1)
-	go func() {
-		conn, acceptErr := ln.Accept()
-		if acceptErr == nil {
-			accepted <- struct{}{}
-			_ = conn.Close()
-		}
-	}()
-
-	// First server is unroutable so the dialer must fail over to the live listener
-	r := dnsResolver(&Config{HTTPConfig: HTTPConfig{
-		HTTPConnectionTimeout: fftypes.FFDuration(5 * time.Second),
-		DNSServers:            []string{"127.0.0.1:1", ln.Addr().String()},
-	}})
-	require.NotNil(t, r)
-
-	conn, err := r.Dial(context.Background(), "tcp", "ignored:53")
-	require.NoError(t, err)
-	defer conn.Close()
-	assert.Equal(t, ln.Addr().String(), conn.RemoteAddr().String())
-
-	select {
-	case <-accepted:
-	case <-time.After(5 * time.Second):
-		t.Fatal("DNS dial did not reach the configured server")
-	}
-}
-
-func TestDNSResolverDialAllFail(t *testing.T) {
-	r := dnsResolver(&Config{HTTPConfig: HTTPConfig{
-		HTTPConnectionTimeout: fftypes.FFDuration(250 * time.Millisecond),
-		DNSServers:            []string{"127.0.0.1:1"},
-	}})
-	require.NotNil(t, r)
-	_, err := r.Dial(context.Background(), "tcp", "ignored:53")
-	assert.Error(t, err)
-}
-
-func TestNewWithConfigDNSServersWired(t *testing.T) {
+func TestNewWithConfigResolverWired(t *testing.T) {
+	// A programmatic resolver (e.g. built from the dns config subsection by ffdns) is
+	// attached to the transport's dialer rather than forcing the all-or-nothing custom client.
 	ctx := context.Background()
 	c := NewWithConfig(ctx, Config{HTTPConfig: HTTPConfig{
-		DNSServers: []string{"8.8.8.8"},
+		Resolver: &net.Resolver{PreferGo: true},
 	}})
 	require.NotNil(t, c)
 	transport, ok := c.GetClient().Transport.(*http.Transport)
 	require.True(t, ok)
 	assert.NotNil(t, transport.DialContext)
+}
+
+func TestDialControlBlocksLoopbackByDefault(t *testing.T) {
+	// A client built from default config blocks SSRF to loopback before connecting
+	resetConf()
+	utConf.Set(HTTPConfigURL, "http://127.0.0.1:1")
+	c, err := New(context.Background(), utConf)
+	require.NoError(t, err)
+	_, err = c.R().Get("/")
+	assert.Regexp(t, "FF00261", err)
+}
+
+func TestGenerateConfigDNSResolver(t *testing.T) {
+	// With dns.servers configured, GenerateConfig populates a resolver via ffdns
+	resetConf()
+	utConf.SubSection("net").Set(ffdns.DNSServers, []string{"8.8.8.8"})
+	cfg, err := GenerateConfig(context.Background(), utConf)
+	assert.NoError(t, err)
+	assert.NotNil(t, cfg.Resolver)
+
+	// With no dns.servers, no resolver is built and Go's default selection stays in place
+	resetConf()
+	cfg, err = GenerateConfig(context.Background(), utConf)
+	assert.NoError(t, err)
+	assert.Nil(t, cfg.Resolver)
 }
