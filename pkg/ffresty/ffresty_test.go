@@ -838,7 +838,10 @@ func TestNewWithConfigResolverWired(t *testing.T) {
 func TestDialControlBlocksLoopbackWhenConfigured(t *testing.T) {
 	// With an SSRF denylist configured, the client blocks loopback before connecting
 	resetConf()
-	utConf.SubSection("net").Set(ffnet.CIDRDenylist, ffnet.SSRFDenylist)
+	ssrfDenylist := []string{
+		"127.0.0.0/8",
+	}
+	utConf.SubSection("net").Set(ffnet.CIDRDenylist, ssrfDenylist)
 	utConf.Set(HTTPConfigURL, "http://127.0.0.1:1")
 	c, err := New(context.Background(), utConf)
 	require.NoError(t, err)
@@ -849,7 +852,7 @@ func TestDialControlBlocksLoopbackWhenConfigured(t *testing.T) {
 func TestGenerateConfigDNSResolver(t *testing.T) {
 	// With dns.servers configured, GenerateConfig populates a resolver via ffdns
 	resetConf()
-	utConf.SubSection("net").Set(ffdns.DNSServers, []string{"8.8.8.8"})
+	utConf.SubSection("dns").Set(ffdns.DNSServers, []string{"8.8.8.8"})
 	cfg, err := GenerateConfig(context.Background(), utConf)
 	assert.NoError(t, err)
 	assert.NotNil(t, cfg.Resolver)

@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/hyperledger/firefly-common/pkg/config"
+	"github.com/hyperledger/firefly-common/pkg/ffdns"
 	"github.com/hyperledger/firefly-common/pkg/ffnet"
 	"github.com/hyperledger/firefly-common/pkg/ffresty"
 	"github.com/hyperledger/firefly-common/pkg/fftls"
@@ -116,7 +117,14 @@ func GenerateConfig(ctx context.Context, conf config.Section) (*WSConfig, error)
 	if err != nil {
 		return nil, err
 	}
-	netDialer, err := ffnet.NewDialer(ctx, netCfg)
+
+	dnsCfg, err := ffdns.GenerateConfig(conf.SubSection("dns"))
+	if err != nil {
+		return nil, err
+	}
+	resolver := ffdns.NewResolverWithConfig(dnsCfg)
+
+	netDialer, err := ffnet.NewDialer(ctx, netCfg, resolver)
 	if err != nil {
 		return nil, err
 	}

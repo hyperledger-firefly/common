@@ -85,8 +85,15 @@ func TestWSConfigNetDialerDefaults(t *testing.T) {
 
 func TestWSConfigNetDialerCustom(t *testing.T) {
 	resetConf()
-	utConf.SubSection("net").Set(ffdns.DNSServers, []string{"8.8.8.8"})
-	utConf.SubSection("net").Set(ffnet.CIDRDenylist, ffnet.SSRFDenylist) // opt in to the egress guard
+	ssrfDenylist := []string{
+		"0.0.0.0/8",
+		"127.0.0.0/8",
+		"169.254.0.0/16",
+		"224.0.0.0/4",
+		"240.0.0.0/4",
+	}
+	utConf.SubSection("dns").Set(ffdns.DNSServers, []string{"8.8.8.8"})
+	utConf.SubSection("net").Set(ffnet.CIDRDenylist, ssrfDenylist) // opt in to the egress guard
 
 	ctx := context.Background()
 	wsConfig, err := GenerateConfig(ctx, utConf)

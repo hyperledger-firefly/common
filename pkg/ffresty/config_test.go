@@ -48,7 +48,7 @@ func TestWSConfigGeneration(t *testing.T) {
 	utConf.Set(HTTPTLSHandshakeTimeout, 1)
 	utConf.Set(HTTPExpectContinueTimeout, 1)
 	utConf.Set(HTTPPassthroughHeadersEnabled, true)
-	utConf.SubSection("net").Set(ffdns.DNSServers, []string{"8.8.8.8", "1.1.1.1:53"})
+	utConf.SubSection("dns").Set(ffdns.DNSServers, []string{"8.8.8.8", "1.1.1.1:53"})
 
 	ctx := context.Background()
 	config, err := GenerateConfig(ctx, utConf)
