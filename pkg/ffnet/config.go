@@ -21,7 +21,6 @@ package ffnet
 
 import (
 	"github.com/hyperledger/firefly-common/pkg/config"
-	"github.com/hyperledger/firefly-common/pkg/ffdns"
 )
 
 const (
@@ -39,7 +38,6 @@ type Config struct {
 }
 
 func InitConfig(conf config.Section) {
-	ffdns.InitConfig(conf)
 	conf.AddKnownKey(NetCIDRDenylist)
 }
 
