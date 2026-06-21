@@ -24,10 +24,9 @@ import (
 	"github.com/hyperledger/firefly-common/pkg/i18n"
 )
 
-// NewDialer builds a *net.Dialer wired with the custom DNS resolver (if any) and the SSRF
-// egress guard (on by default). The caller is responsible for setting Timeout / KeepAlive to
-// suit its protocol. Exported so any dialer-based client — HTTP, WebSocket, etc. — can apply
-// identical outbound protection from the same config.
+// NewDialer builds a *net.Dialer wired with the CIDR egress guard and provided the DNS resolver (if any).
+// The caller is responsible for setting Timeout / KeepAlive to  suit its protocol. Exported so any dialer-based
+// client — HTTP, WebSocket, etc. — can apply identical outbound protection from the same config.
 func NewDialer(ctx context.Context, cfg *Config, resolver *net.Resolver) (*net.Dialer, error) {
 	control, err := NewDialControl(ctx, cfg)
 	if err != nil {
@@ -42,7 +41,7 @@ func NewDialer(ctx context.Context, cfg *Config, resolver *net.Resolver) (*net.D
 type DialControl func(network, address string, c syscall.RawConn) error
 
 // NewDialControl builds a net.Dialer Control function that rejects connections to any address
-// inside the effective CIDR denylist — the core SSRF mitigation. It runs after DNS resolution
+// inside the effective CIDR denylist. It runs after DNS resolution
 // against the actual resolved IP, so it also defeats DNS-rebinding and literal-IP bypasses.
 // Returns (nil, nil) when the effective denylist is empty (no restrictions).
 func NewDialControl(ctx context.Context, cfg *Config) (DialControl, error) {

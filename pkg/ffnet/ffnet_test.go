@@ -1,4 +1,4 @@
-// Copyright © 2025 Kaleido, Inc.
+// Copyright © 2026 Kaleido, Inc.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -182,7 +182,7 @@ func TestGenerateConfigDenylistFromConfig(t *testing.T) {
 		"172.16.0.0/12",
 		"192.168.0.0/16",
 	}
-	utConf.Set(CIDRDenylist, ipv4PrivateCIDRs)
+	utConf.Set(NetCIDRDenylist, ipv4PrivateCIDRs)
 	cfg, err := GenerateConfig(utConf)
 	require.NoError(t, err)
 	assert.Equal(t, ipv4PrivateCIDRs, cfg.CIDRDenylist)
@@ -227,7 +227,7 @@ func TestGenerateConfigDenylistSemantics(t *testing.T) {
 
 	// Configured denylist => guard active
 	resetConf()
-	utConf.Set(CIDRDenylist, testSSRDenylist)
+	utConf.Set(NetCIDRDenylist, testSSRDenylist)
 	cfg, err = GenerateConfig(utConf)
 	require.NoError(t, err)
 	assert.NotEmpty(t, cfg.CIDRDenylist)

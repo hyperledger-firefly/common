@@ -1,4 +1,4 @@
-// Copyright © 2025 Kaleido, Inc.
+// Copyright © 2026 Kaleido, Inc.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -26,32 +26,25 @@ import (
 
 const (
 	// CIDRDenylist is the list of CIDR ranges to which outbound connections are blocked, as a
-	// core SSRF mitigation. It is empty by default — ffnet/ffresty is frequently used for private
-	// service-to-service traffic, so we do not presume which ranges are off-limits. Callers should
-	// compose an appropriate denylist from the exported building-block lists below (e.g.
-	// RecommendedSSRFDenylist for externally-reachable/webhook clients, or a narrower set such as
-	// CloudMetadataCIDRs for internal clients that still want to block IMDS).
-	CIDRDenylist = "cidrDenylist"
+	// core SSRF mitigation. It is empty by default. Callers should
+	// compose an appropriate denylist depending on the client's use case.
+	NetCIDRDenylist = "cidrDenylist"
 )
 
-// Config is the combined outbound-dialer configuration: the DNS resolver settings plus the
-// egress CIDR denylist.
+// Config is the outbound-dialer configuration.
 type Config struct {
 	// CIDRDenylist is the set of CIDR ranges to block outbound connections to. Empty means no
-	// restriction. Compose it from the exported building-block lists — e.g.
-	// SSRFDenylist for any externally-configurable/webhook dialer.
+	// restriction.
 	CIDRDenylist []string
 }
 
 func InitConfig(conf config.Section) {
 	ffdns.InitConfig(conf)
-	conf.AddKnownKey(CIDRDenylist)
+	conf.AddKnownKey(NetCIDRDenylist)
 }
 
 func GenerateConfig(conf config.Section) (*Config, error) {
 	cfg := &Config{}
-	// Empty by default (no egress restriction); callers opt in via config or by composing one of
-	// the exported denylists.
-	cfg.CIDRDenylist = conf.GetStringSlice(CIDRDenylist)
+	cfg.CIDRDenylist = conf.GetStringSlice(NetCIDRDenylist)
 	return cfg, nil
 }

@@ -23,11 +23,11 @@ import (
 )
 
 const (
-	// DNSServers an optional list of DNS server addresses (host or host:port, port defaults
-	// to 53). Setting this forces use of Go's built-in resolver rather than the system one.
-	DNSServers = "dnsServers"
-	// DNSTimeout the dial timeout when contacting a configured DNS server
-	DNSTimeout = "dnsTimeout"
+	// Servers an optional list of DNS server addresses (host or host:port, port defaults
+	// to 53). Setting this forces use of Go's built-in resolver.
+	DNSServers = "servers"
+	// Timeout the dial timeout when contacting a configured DNS server
+	DNSTimeout = "timeout"
 )
 
 type Config struct {

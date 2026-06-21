@@ -841,7 +841,7 @@ func TestDialControlBlocksLoopbackWhenConfigured(t *testing.T) {
 	ssrfDenylist := []string{
 		"127.0.0.0/8",
 	}
-	utConf.SubSection("net").Set(ffnet.CIDRDenylist, ssrfDenylist)
+	utConf.SubSection("net").Set(ffnet.NetCIDRDenylist, ssrfDenylist)
 	utConf.Set(HTTPConfigURL, "http://127.0.0.1:1")
 	c, err := New(context.Background(), utConf)
 	require.NoError(t, err)

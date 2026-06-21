@@ -43,11 +43,11 @@ func EnableResolverMetrics(ctx context.Context, metricsRegistry metric.MetricsRe
 	metricsManager.NewCounterMetricWithLabels(ctx, metricsDNSErrorsTotal, "DNS errors", []string{"server", "error"}, false)
 }
 
-// NewDNSResolver builds a pure-Go *net.Resolver that dials the given DNS servers
-// (each host or host:port, port defaulting to 53) in order, failing over to the
-// next on error. Returns nil when no servers are given (use the system resolver).
+// NewDNSResolver builds a pure-Go *net.Resolver for metrics instructmentation, custom timeouts, and/or custom servers.
+// The resolver will dial the given DNS servers (each host or host:port, port defaulting to 53) in order, failing over to the
+// next on error. Returns nil if none of the customizations (metrics, timeout, or servers) are enabeld.
 // Exported so non-ffresty dialers — e.g. a WebSocket dialer — can honour the same
-// dnsServers config as the HTTP client.
+// DNS config as the HTTP client.
 func NewResolver(config config.Section) *net.Resolver {
 	cfg, err := GenerateConfig(config)
 	if err != nil {
@@ -58,23 +58,38 @@ func NewResolver(config config.Section) *net.Resolver {
 }
 
 func NewResolverWithConfig(cfg *Config) *net.Resolver {
-	if len(cfg.Servers) == 0 {
-		return nil // TODO no matter what do we want / need DNS metrics ?
+	var servers []string
+	if len(cfg.Servers) > 0 {
+		servers = make([]string, len(cfg.Servers))
+		for i, server := range cfg.Servers {
+			servers[i] = withDefaultDNSPort(server)
+		}
 	}
-	servers := make([]string, len(cfg.Servers))
-	for i, server := range cfg.Servers {
-		servers[i] = withDefaultDNSPort(server)
+
+	// If we have nothing to layer on top of the system resolver — no configured servers, no
+	// dial timeout, and metrics disabled — leave it untouched (callers treat nil as "use the
+	// system resolver"). Returning a resolver here would force Go's built-in resolver
+	// (PreferGo) in deployments that haven't opted into any of these.
+	if len(servers) == 0 && cfg.Timeout <= 0 && metricsManager == nil {
+		return nil
 	}
+
 	return &net.Resolver{
 		PreferGo: true,
-		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
 			d := net.Dialer{Timeout: cfg.Timeout}
+			// When no servers are explicitly configured, wrap Go's built-in resolver: it has
+			// already selected a nameserver from the system config (resolv.conf) and passes it
+			// as address, so we dial that and still apply our timeout and metrics.
+			dialServers := servers
+			if len(dialServers) == 0 {
+				dialServers = []string{address}
+			}
 			var err error
 			// Go's built-in resolver dials a fresh connection per query exchange (escalating
 			// from UDP to TCP for truncated responses), so each Dial maps to a DNS request. We
-			// record metrics at this connection level; richer rcode-level metrics would require
-			// parsing the DNS response off the returned conn.
-			for _, server := range servers {
+			// record metrics at this connection level.
+			for _, server := range dialServers {
 				recordDNSMetric(ctx, metricsDNSRequestsTotal, map[string]string{"server": server})
 				var conn net.Conn
 				if conn, err = d.DialContext(ctx, network, server); err == nil {
