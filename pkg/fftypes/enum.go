@@ -27,15 +27,23 @@ import (
 
 type FFEnum string
 
-var enumValues = map[string][]interface{}{}
+var enumValues = map[string][]string{}
 
 func FFEnumValue(t string, val string) FFEnum {
+	t = strings.ToLower(t)
 	enumValues[t] = append(enumValues[t], val)
 	return FFEnum(val)
 }
 
 func FFEnumValues(t string) []interface{} {
-	return enumValues[t]
+	values := enumValues[strings.ToLower(t)]
+
+	// Convert []string to []interface{} for openapi3.Schema.Enum.
+	result := make([]interface{}, len(values))
+	for i, v := range values {
+		result[i] = v
+	}
+	return result
 }
 
 func (ts FFEnum) String() string {
@@ -74,8 +82,8 @@ func FFEnumParseString(ctx context.Context, t, val string) (FFEnum, error) {
 		return "", i18n.NewError(ctx, i18n.MsgInvalidEnum, t)
 	}
 	for _, possible := range e {
-		if possible == strings.ToLower(val) {
-			return FFEnum(strings.ToLower(val)), nil
+		if strings.EqualFold(possible, val) {
+			return FFEnum(strings.ToLower(possible)), nil
 		}
 	}
 	return "", i18n.NewError(ctx, i18n.MsgInvalidEnumValue, val, t, e)
