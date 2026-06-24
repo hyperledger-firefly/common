@@ -6,9 +6,12 @@ import (
 	"time"
 
 	"github.com/hyperledger/firefly-common/pkg/config"
+	"github.com/hyperledger/firefly-common/pkg/ffdns"
+	"github.com/hyperledger/firefly-common/pkg/ffnet"
 	"github.com/hyperledger/firefly-common/pkg/ffresty"
 	"github.com/hyperledger/firefly-common/pkg/fftls"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 var utConf = config.RootSection("ws")
@@ -64,6 +67,41 @@ func TestWSConfigGenerationDefaults(t *testing.T) {
 	assert.Equal(t, defaultInitialConnectAttempts, wsConfig.InitialConnectAttempts)
 	assert.False(t, wsConfig.BackgroundConnect)
 	assert.Equal(t, 30*time.Second, wsConfig.HeartbeatInterval)
+}
+
+func TestWSConfigNetDialerDefaults(t *testing.T) {
+	resetConf()
+
+	ctx := context.Background()
+	wsConfig, err := GenerateConfig(ctx, utConf)
+	require.NoError(t, err)
+
+	// No egress denylist or DNS servers configured by default => no guard, system resolver
+	require.NotNil(t, wsConfig.NetDialer)
+	assert.Nil(t, wsConfig.NetDialer.Resolver)
+	assert.Nil(t, wsConfig.NetDialer.Control)
+	assert.Equal(t, defaultConnectionTimeout, wsConfig.NetDialer.Timeout)
+}
+
+func TestWSConfigNetDialerCustom(t *testing.T) {
+	resetConf()
+	ssrfDenylist := []string{
+		"0.0.0.0/8",
+		"127.0.0.0/8",
+		"169.254.0.0/16",
+		"224.0.0.0/4",
+		"240.0.0.0/4",
+	}
+	utConf.SubSection("dns").Set(ffdns.DNSServers, []string{"8.8.8.8"})
+	utConf.SubSection("net").Set(ffnet.NetCIDRDenylist, ssrfDenylist) // opt in to the egress guard
+
+	ctx := context.Background()
+	wsConfig, err := GenerateConfig(ctx, utConf)
+	require.NoError(t, err)
+	require.NotNil(t, wsConfig.NetDialer)
+	assert.NotNil(t, wsConfig.NetDialer.Resolver) // custom DNS servers
+	require.NotNil(t, wsConfig.NetDialer.Control) // denylist active
+	assert.Error(t, wsConfig.NetDialer.Control("tcp", "169.254.169.254:80", nil))
 }
 
 func TestWSConfigTLSGenerationFail(t *testing.T) {

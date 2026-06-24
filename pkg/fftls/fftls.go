@@ -21,6 +21,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/pem"
 	"os"
 	"regexp"
 	"strings"
@@ -28,6 +29,7 @@ import (
 	"github.com/hyperledger/firefly-common/pkg/config"
 	"github.com/hyperledger/firefly-common/pkg/i18n"
 	"github.com/hyperledger/firefly-common/pkg/log"
+	"github.com/hyperledger/firefly-common/pkg/metric"
 )
 
 type TLSType string
@@ -36,6 +38,45 @@ const (
 	ServerType TLSType = "server"
 	ClientType TLSType = "client"
 )
+
+const (
+	// CertMetricsSubsystem is the metrics subsystem under which the certificate expiry gauge is
+	// registered, i.e. ff_tls_certificate_expiry.
+	CertMetricsSubsystem = "tls"
+
+	metricsTLSCertificateExpiry = "certificate_expiry"
+
+	// Values for the "type" label on the certificate expiry gauge
+	certTypeCA     = "ca"
+	certTypeClient = "client"
+	certTypeServer = "server"
+)
+
+// certMetricsManager is the optional, process-wide metrics manager used to emit certificate expiry
+// gauges as TLS configs are loaded. It is nil until EnableCertificateMetrics is called.
+var certMetricsManager metric.MetricsManager
+
+// EnableCertificateMetrics registers a gauge (in the "tls" subsystem) that is set to the unix
+// timestamp at which loaded TLS certificates expire. Once enabled, every subsequent NewTLSConfig /
+// ConstructTLSConfig call records the gauge for each CA certificate, and for the configured client or
+// server certificate - distinguished by the "type" label (ca/client/server). Because certificate
+// expiry is static, these are only recorded once when the certificate material is read - never
+// per-connection.
+//
+// It is safe to call this multiple times; only the first call registers the metric. Callers that
+// build both client and server TLS configs only need to call it once for the shared registry.
+func EnableCertificateMetrics(ctx context.Context, metricsRegistry metric.MetricsRegistry) error {
+	if certMetricsManager != nil {
+		return nil
+	}
+	mm, err := metricsRegistry.NewMetricsManagerForSubsystem(ctx, CertMetricsSubsystem)
+	if err != nil {
+		return err
+	}
+	mm.NewGaugeMetricWithLabels(ctx, metricsTLSCertificateExpiry, "TLS certificate expiry as a unix timestamp", []string{"type", "subject", "issuer"}, false)
+	certMetricsManager = mm
+	return nil
+}
 
 func ConstructTLSConfig(ctx context.Context, conf config.Section, tlsType TLSType) (*tls.Config, error) {
 	return NewTLSConfig(ctx, GenerateConfig(conf), tlsType)
@@ -72,6 +113,9 @@ func NewTLSConfig(ctx context.Context, config *Config, tlsType TLSType) (*tls.Co
 			ok := rootCAs.AppendCertsFromPEM(caBytes)
 			if !ok {
 				err = i18n.NewError(ctx, i18n.MsgInvalidCAFile)
+			} else {
+				// The CA bundle may contain multiple certificates - record an expiry gauge for each
+				recordCACertExpiryMetrics(ctx, caBytes)
 			}
 		}
 	case config.CA != "":
@@ -79,6 +123,9 @@ func NewTLSConfig(ctx context.Context, config *Config, tlsType TLSType) (*tls.Co
 		ok := rootCAs.AppendCertsFromPEM([]byte(config.CA))
 		if !ok {
 			err = i18n.NewError(ctx, i18n.MsgInvalidCAFile)
+		} else {
+			// The CA bundle may contain multiple certificates - record an expiry gauge for each
+			recordCACertExpiryMetrics(ctx, []byte(config.CA))
 		}
 	default:
 		rootCAs, err = x509.SystemCertPool()
@@ -109,6 +156,10 @@ func NewTLSConfig(ctx context.Context, config *Config, tlsType TLSType) (*tls.Co
 	}
 
 	if configuredCert != nil {
+		// Record an expiry gauge for the configured leaf certificate (client cert for ClientType,
+		// server cert for ServerType). The corresponding key must also have been provided to reach here.
+		recordLeafCertExpiryMetric(ctx, configuredCert, tlsType)
+
 		// Rather than letting Golang pick a certificate it thinks matches from the list of one,
 		// we directly supply it the one we have in all cases.
 		tlsConfig.GetClientCertificate = func(_ *tls.CertificateRequestInfo) (*tls.Certificate, error) {
@@ -144,6 +195,70 @@ func NewTLSConfig(ctx context.Context, config *Config, tlsType TLSType) (*tls.Co
 
 	return tlsConfig, nil
 
+}
+
+// recordCACertExpiryMetrics decodes a PEM bundle (which may contain one or more certificates) and
+// records a CA certificate expiry gauge for each. It is best-effort and never fails the TLS config
+// construction: it is a no-op if metrics are not enabled, and certificates that cannot be parsed are
+// skipped with a warning.
+func recordCACertExpiryMetrics(ctx context.Context, pemBytes []byte) {
+	if certMetricsManager == nil {
+		return
+	}
+	rest := pemBytes
+	for {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		if block.Type != "CERTIFICATE" {
+			continue
+		}
+		cert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			log.L(ctx).Warnf("Skipping certificate that could not be parsed for expiry metric: %s", err)
+			continue
+		}
+		setCertExpiryGauge(ctx, certTypeCA, cert)
+	}
+}
+
+// recordLeafCertExpiryMetric records the expiry gauge for the leaf certificate of a configured key
+// pair - using the client gauge for ClientType TLS and the server gauge for ServerType TLS.
+//
+// The configured cert/key may be a bundle (leaf followed by its intermediate chain). crypto/tls
+// guarantees the leaf is first: X509KeyPair/LoadX509KeyPair require Certificate[0] to be the
+// certificate that matches the private key, so we record the expiry of Certificate[0] - never an
+// intermediate from the chain.
+func recordLeafCertExpiryMetric(ctx context.Context, cert *tls.Certificate, tlsType TLSType) {
+	if certMetricsManager == nil || len(cert.Certificate) == 0 {
+		return
+	}
+	leaf := cert.Leaf
+	if leaf == nil {
+		parsed, err := x509.ParseCertificate(cert.Certificate[0])
+		if err != nil {
+			log.L(ctx).Warnf("Unable to parse leaf certificate for expiry metric: %s", err)
+			return
+		}
+		leaf = parsed
+	}
+	certType := certTypeClient
+	if tlsType == ServerType {
+		certType = certTypeServer
+	}
+	setCertExpiryGauge(ctx, certType, leaf)
+}
+
+// setCertExpiryGauge sets the certificate expiry gauge to the unix timestamp of the certificate's
+// expiry, labelled with the certificate type (ca/client/server).
+func setCertExpiryGauge(ctx context.Context, certType string, cert *x509.Certificate) {
+	certMetricsManager.SetGaugeMetricWithLabels(ctx, metricsTLSCertificateExpiry, float64(cert.NotAfter.Unix()), map[string]string{
+		"type":    certType,
+		"subject": cert.Subject.String(),
+		"issuer":  cert.Issuer.String(),
+	}, nil)
 }
 
 var SubjectDNKnownAttributes = map[string]func(pkix.Name) []string{

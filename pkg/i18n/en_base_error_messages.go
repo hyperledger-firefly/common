@@ -194,4 +194,6 @@ var (
 	MsgInvalidLogLevel                             = ffe("FF00257", "Invalid log level: '%s'", http.StatusBadRequest)
 	MsgFFExtensionsInvalid                         = ffe("FF00258", "Invalid extension '%s' - extensions should be RFC 3986 compliant query parameter format (e.g. x-name=value with percent-encoding for special characters)", http.StatusBadRequest)
 	MsgFFExtensionsInvalidEncoding                 = ffe("FF00259", "Invalid extension key '%s' - extension keys must follow the format 'x-<name>'", http.StatusBadRequest)
+	MsgInvalidCIDR                                 = ffe("FF00260", "Invalid CIDR '%s' in denylist configuration", http.StatusBadRequest)
+	MsgConnectionToCIDRBlocked                     = ffe("FF00261", "Connection to '%s' blocked by CIDR denylist (%s)", http.StatusForbidden)
 )

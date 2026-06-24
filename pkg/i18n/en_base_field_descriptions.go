@@ -87,6 +87,7 @@ var (
 	RESTConfigAuthPassword                  = ffm("RESTConfig.authPassword", "Password for the HTTP/HTTPS Basic Auth header")
 	RESTConfigAuthUsername                  = ffm("RESTConfig.authUsername", "Username for the HTTP/HTTPS Basic Auth header")
 	RESTConfigConnectionTimeout             = ffm("RESTConfig.connectionTimeout", "HTTP connection timeout")
+	RESTConfigDNSServers                    = ffm("RESTConfig.dnsServers", "An optional list of DNS server addresses (host or host:port, port defaults to 53) to use for name resolution. Setting this forces use of Go's built-in DNS resolver rather than the system resolver")
 	RESTConfigExpectContinueTimeout         = ffm("RESTConfig.expectContinueTimeout", "Time to wait for the first response from the server after connecting")
 	RESTConfigExpectHeaders                 = ffm("RESTConfig.headers", "Headers to add to the HTTP call")
 	RESTConfigHTTPPassthroughHeadersEnabled = ffm("RESTConfig.httpPassthroughHeadersEnabled", "Proxy request ID or other configured headers from an upstream microservice connection")
