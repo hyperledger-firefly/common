@@ -23,7 +23,7 @@ import (
 	sq "github.com/Masterminds/squirrel"
 	migratedb "github.com/golang-migrate/migrate/v4/database"
 	"github.com/golang-migrate/migrate/v4/database/sqlite3"
-	"github.com/hyperledger/firefly-common/pkg/config"
+	"github.com/hyperledger-firefly/common/pkg/config"
 
 	// Import SQLite driver
 	_ "github.com/mattn/go-sqlite3"

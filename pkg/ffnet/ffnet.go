@@ -21,7 +21,7 @@ import (
 	"net"
 	"syscall"
 
-	"github.com/hyperledger/firefly-common/pkg/i18n"
+	"github.com/hyperledger-firefly/common/pkg/i18n"
 )
 
 // NewDialer builds a *net.Dialer wired with the CIDR egress guard and provided the DNS resolver (if any).

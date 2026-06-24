@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hyperledger/firefly-common/pkg/fftypes"
+	"github.com/hyperledger-firefly/common/pkg/fftypes"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )

@@ -19,9 +19,9 @@ package httpserver
 import (
 	"net/http"
 
-	"github.com/hyperledger/firefly-common/pkg/auth/authfactory"
-	"github.com/hyperledger/firefly-common/pkg/config"
-	"github.com/hyperledger/firefly-common/pkg/fftls"
+	"github.com/hyperledger-firefly/common/pkg/auth/authfactory"
+	"github.com/hyperledger-firefly/common/pkg/config"
+	"github.com/hyperledger-firefly/common/pkg/fftls"
 )
 
 const (

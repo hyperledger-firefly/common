@@ -23,11 +23,11 @@ import (
 	"regexp"
 	"sync"
 
-	"github.com/hyperledger/firefly-common/pkg/dbsql"
-	"github.com/hyperledger/firefly-common/pkg/fftypes"
-	"github.com/hyperledger/firefly-common/pkg/i18n"
-	"github.com/hyperledger/firefly-common/pkg/log"
-	"github.com/hyperledger/firefly-common/pkg/retry"
+	"github.com/hyperledger-firefly/common/pkg/dbsql"
+	"github.com/hyperledger-firefly/common/pkg/fftypes"
+	"github.com/hyperledger-firefly/common/pkg/i18n"
+	"github.com/hyperledger-firefly/common/pkg/log"
+	"github.com/hyperledger-firefly/common/pkg/retry"
 )
 
 type EventStreamType = fftypes.FFEnum

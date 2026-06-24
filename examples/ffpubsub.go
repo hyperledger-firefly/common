@@ -27,12 +27,12 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/hyperledger/firefly-common/pkg/config"
-	"github.com/hyperledger/firefly-common/pkg/dbsql"
-	"github.com/hyperledger/firefly-common/pkg/eventstreams"
-	"github.com/hyperledger/firefly-common/pkg/fftypes"
-	"github.com/hyperledger/firefly-common/pkg/log"
-	"github.com/hyperledger/firefly-common/pkg/wsserver"
+	"github.com/hyperledger-firefly/common/pkg/config"
+	"github.com/hyperledger-firefly/common/pkg/dbsql"
+	"github.com/hyperledger-firefly/common/pkg/eventstreams"
+	"github.com/hyperledger-firefly/common/pkg/fftypes"
+	"github.com/hyperledger-firefly/common/pkg/log"
+	"github.com/hyperledger-firefly/common/pkg/wsserver"
 )
 
 // Run from root of project with:

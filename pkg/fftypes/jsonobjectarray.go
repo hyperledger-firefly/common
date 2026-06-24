@@ -22,7 +22,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 
-	"github.com/hyperledger/firefly-common/pkg/i18n"
+	"github.com/hyperledger-firefly/common/pkg/i18n"
 )
 
 // JSONObjectArray is an array of JSONObject

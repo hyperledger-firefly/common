@@ -26,9 +26,9 @@ import (
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/ghodss/yaml"
-	"github.com/hyperledger/firefly-common/pkg/config"
-	"github.com/hyperledger/firefly-common/pkg/fftypes"
-	"github.com/hyperledger/firefly-common/pkg/i18n"
+	"github.com/hyperledger-firefly/common/pkg/config"
+	"github.com/hyperledger-firefly/common/pkg/fftypes"
+	"github.com/hyperledger-firefly/common/pkg/i18n"
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/text/language"
 )

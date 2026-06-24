@@ -20,11 +20,11 @@ import (
 	"context"
 	"crypto/tls"
 
-	"github.com/hyperledger/firefly-common/pkg/config"
-	"github.com/hyperledger/firefly-common/pkg/ffresty"
-	"github.com/hyperledger/firefly-common/pkg/fftls"
-	"github.com/hyperledger/firefly-common/pkg/fftypes"
-	"github.com/hyperledger/firefly-common/pkg/retry"
+	"github.com/hyperledger-firefly/common/pkg/config"
+	"github.com/hyperledger-firefly/common/pkg/ffresty"
+	"github.com/hyperledger-firefly/common/pkg/fftls"
+	"github.com/hyperledger-firefly/common/pkg/fftypes"
+	"github.com/hyperledger-firefly/common/pkg/retry"
 )
 
 // DispatcherFactory is the interface to plug in a custom dispatcher, for example to provide

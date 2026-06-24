@@ -30,11 +30,11 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/hyperledger/firefly-common/pkg/ffresty"
-	"github.com/hyperledger/firefly-common/pkg/fftypes"
-	"github.com/hyperledger/firefly-common/pkg/i18n"
-	"github.com/hyperledger/firefly-common/pkg/log"
-	"github.com/hyperledger/firefly-common/pkg/retry"
+	"github.com/hyperledger-firefly/common/pkg/ffresty"
+	"github.com/hyperledger-firefly/common/pkg/fftypes"
+	"github.com/hyperledger-firefly/common/pkg/i18n"
+	"github.com/hyperledger-firefly/common/pkg/log"
+	"github.com/hyperledger-firefly/common/pkg/retry"
 	"golang.org/x/time/rate"
 )
 

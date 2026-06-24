@@ -33,10 +33,10 @@ import (
 
 	"github.com/ghodss/yaml"
 	"github.com/gorilla/mux"
-	"github.com/hyperledger/firefly-common/pkg/fftypes"
-	"github.com/hyperledger/firefly-common/pkg/httpserver"
-	"github.com/hyperledger/firefly-common/pkg/i18n"
-	"github.com/hyperledger/firefly-common/pkg/log"
+	"github.com/hyperledger-firefly/common/pkg/fftypes"
+	"github.com/hyperledger-firefly/common/pkg/httpserver"
+	"github.com/hyperledger-firefly/common/pkg/i18n"
+	"github.com/hyperledger-firefly/common/pkg/log"
 	"github.com/sirupsen/logrus"
 )
 

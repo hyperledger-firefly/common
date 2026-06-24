@@ -20,7 +20,7 @@
 package ffnet
 
 import (
-	"github.com/hyperledger/firefly-common/pkg/config"
+	"github.com/hyperledger-firefly/common/pkg/config"
 )
 
 const (

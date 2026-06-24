@@ -22,8 +22,8 @@ import (
 	"sync"
 
 	"github.com/gorilla/websocket"
-	"github.com/hyperledger/firefly-common/pkg/i18n"
-	"github.com/hyperledger/firefly-common/pkg/log"
+	"github.com/hyperledger-firefly/common/pkg/i18n"
+	"github.com/hyperledger-firefly/common/pkg/log"
 )
 
 // The Protocol interface layers a protocol on top of raw websockets, that allows the server side to:

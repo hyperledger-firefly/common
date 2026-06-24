@@ -22,7 +22,7 @@ import (
 	"encoding/json"
 	"math/big"
 
-	"github.com/hyperledger/firefly-common/pkg/i18n"
+	"github.com/hyperledger-firefly/common/pkg/i18n"
 )
 
 const MaxFFBigIntHexLength = 65

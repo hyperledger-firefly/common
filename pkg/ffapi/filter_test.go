@@ -21,7 +21,7 @@ import (
 	"database/sql/driver"
 	"testing"
 
-	"github.com/hyperledger/firefly-common/pkg/fftypes"
+	"github.com/hyperledger-firefly/common/pkg/fftypes"
 	"github.com/stretchr/testify/assert"
 )
 

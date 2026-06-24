@@ -20,8 +20,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/hyperledger/firefly-common/pkg/auth/basic"
-	"github.com/hyperledger/firefly-common/pkg/config"
+	"github.com/hyperledger-firefly/common/pkg/auth/basic"
+	"github.com/hyperledger-firefly/common/pkg/config"
 	"github.com/stretchr/testify/assert"
 )
 
