@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hyperledger/firefly-common/pkg/config"
+	"github.com/hyperledger-firefly/common/pkg/config"
 	"gotest.tools/assert"
 )
 

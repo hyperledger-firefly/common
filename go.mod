@@ -1,4 +1,4 @@
-module github.com/hyperledger/firefly-common
+module github.com/hyperledger-firefly/common
 
 go 1.23.0
 

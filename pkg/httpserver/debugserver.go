@@ -25,8 +25,8 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/hyperledger/firefly-common/pkg/config"
-	"github.com/hyperledger/firefly-common/pkg/log"
+	"github.com/hyperledger-firefly/common/pkg/config"
+	"github.com/hyperledger-firefly/common/pkg/log"
 )
 
 func RunDebugServer(ctx context.Context, debugServerConf config.Section, captureAddr ...func(addr net.Addr)) {

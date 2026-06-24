@@ -23,7 +23,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/hyperledger/firefly-common/pkg/i18n"
+	"github.com/hyperledger-firefly/common/pkg/i18n"
 )
 
 // UUID is a wrapper on a UUID implementation, ensuring Value handles nil

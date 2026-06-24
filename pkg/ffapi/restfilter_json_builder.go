@@ -17,7 +17,7 @@
 package ffapi
 
 import (
-	"github.com/hyperledger/firefly-common/pkg/fftypes"
+	"github.com/hyperledger-firefly/common/pkg/fftypes"
 )
 
 type addOns func(op *FilterJSONBase)

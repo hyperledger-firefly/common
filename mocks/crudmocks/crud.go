@@ -5,8 +5,8 @@ package crudmocks
 import (
 	context "context"
 
-	dbsql "github.com/hyperledger/firefly-common/pkg/dbsql"
-	ffapi "github.com/hyperledger/firefly-common/pkg/ffapi"
+	dbsql "github.com/hyperledger-firefly/common/pkg/dbsql"
+	ffapi "github.com/hyperledger-firefly/common/pkg/ffapi"
 
 	mock "github.com/stretchr/testify/mock"
 

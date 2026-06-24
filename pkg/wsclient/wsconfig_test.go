@@ -5,11 +5,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hyperledger/firefly-common/pkg/config"
-	"github.com/hyperledger/firefly-common/pkg/ffdns"
-	"github.com/hyperledger/firefly-common/pkg/ffnet"
-	"github.com/hyperledger/firefly-common/pkg/ffresty"
-	"github.com/hyperledger/firefly-common/pkg/fftls"
+	"github.com/hyperledger-firefly/common/pkg/config"
+	"github.com/hyperledger-firefly/common/pkg/ffdns"
+	"github.com/hyperledger-firefly/common/pkg/ffnet"
+	"github.com/hyperledger-firefly/common/pkg/ffresty"
+	"github.com/hyperledger-firefly/common/pkg/fftls"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

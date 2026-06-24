@@ -24,7 +24,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/hyperledger/firefly-common/pkg/i18n"
+	"github.com/hyperledger-firefly/common/pkg/i18n"
 )
 
 var allMods = []string{"not", "caseInsensitive"}

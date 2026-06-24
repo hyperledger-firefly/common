@@ -24,8 +24,8 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	sq "github.com/Masterminds/squirrel"
 	migratedb "github.com/golang-migrate/migrate/v4/database"
-	"github.com/hyperledger/firefly-common/mocks/dbmigratemocks"
-	"github.com/hyperledger/firefly-common/pkg/config"
+	"github.com/hyperledger-firefly/common/mocks/dbmigratemocks"
+	"github.com/hyperledger-firefly/common/pkg/config"
 )
 
 // MockProvider uses the datadog mocking framework

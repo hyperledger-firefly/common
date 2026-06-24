@@ -19,7 +19,7 @@ package dbsql
 import (
 	"fmt"
 
-	"github.com/hyperledger/firefly-common/pkg/config"
+	"github.com/hyperledger-firefly/common/pkg/config"
 )
 
 const (

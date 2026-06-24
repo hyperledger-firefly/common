@@ -32,7 +32,7 @@ const (
 	//
 	// The default behavior is that items are returned until they have been purged from the cache by an
 	// synchronous reaper
-	// NOTE: see issue https://github.com/hyperledger/firefly-common/issues/85 on operation of the async reaper.
+	// NOTE: see issue https://github.com/hyperledger-firefly/common/issues/85 on operation of the async reaper.
 	StrictExpiry BehaviorOption = iota
 
 	// TTLFromInitialAdd sets the behavior so that the time-to-live for a cache entry is set when

@@ -20,8 +20,8 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/hyperledger/firefly-common/pkg/config"
-	"github.com/hyperledger/firefly-common/pkg/log"
+	"github.com/hyperledger-firefly/common/pkg/config"
+	"github.com/hyperledger-firefly/common/pkg/log"
 	"github.com/rs/cors"
 )
 

@@ -21,9 +21,9 @@ import (
 	"crypto/tls"
 	"database/sql/driver"
 
-	"github.com/hyperledger/firefly-common/pkg/fftypes"
-	"github.com/hyperledger/firefly-common/pkg/log"
-	"github.com/hyperledger/firefly-common/pkg/wsserver"
+	"github.com/hyperledger-firefly/common/pkg/fftypes"
+	"github.com/hyperledger-firefly/common/pkg/log"
+	"github.com/hyperledger-firefly/common/pkg/wsserver"
 )
 
 type DistributionMode = fftypes.FFEnum
