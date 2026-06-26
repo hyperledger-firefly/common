@@ -72,6 +72,19 @@ func TestNewResolverWithConfig(t *testing.T) {
 	assert.NotNil(t, r.Dial)
 }
 
+func TestConfigKeysDocumented(t *testing.T) {
+	// Initialize the DNS config as a subsection (as ffresty/wsclient do), then generate the
+	// config markdown for every known key. This panics if any key is missing a translation,
+	// guarding against the "Translation for config key '...dns.servers' was not found" regression.
+	config.RootConfigReset()
+	InitConfig(config.RootSection("backend").SubSection("dns"))
+
+	assert.NotPanics(t, func() {
+		_, err := config.GenerateConfigMarkdown(context.Background(), "", config.GetKnownKeys())
+		assert.NoError(t, err)
+	})
+}
+
 func TestNewResolverFromConfigSection(t *testing.T) {
 	resetConf()
 	utConf.Set(DNSServers, []string{"8.8.8.8", "1.1.1.1:53"})
