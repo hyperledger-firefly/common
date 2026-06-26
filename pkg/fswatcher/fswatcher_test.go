@@ -34,7 +34,7 @@ func TestFileReconcilerE2E(t *testing.T) {
 	logrus.SetLevel(logrus.DebugLevel)
 	tmpDir := t.TempDir()
 
-	filePath := fmt.Sprintf(fmt.Sprintf("%s/test.yaml", tmpDir))
+	filePath := fmt.Sprintf("%s/test.yaml", tmpDir)
 
 	// Create the file
 	os.WriteFile(fmt.Sprintf("%s/test.yaml", tmpDir), []byte(`{"ut_conf": "one"}`), 0664)
