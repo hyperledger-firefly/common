@@ -92,6 +92,7 @@ var (
 	ConfigGlobalMaxIdleConnsPerHost       = ffc("config.global.maxIdleConnsPerHost", "The max number of idle connections, per unique hostname. Zero means net/http uses the default of only 2.", IntType)
 	ConfigGlobalDNSServers                = ffc("config.global.dns.servers", "An optional list of DNS server addresses (host or host:port, port defaults to 53) to use instead of the system resolver. Setting this forces use of Go's built-in DNS resolver.", ArrayStringType)
 	ConfigGlobalDNSTimeout                = ffc("config.global.dns.timeout", "The dial timeout when contacting a configured DNS server", TimeDurationType)
+	ConfigGlobalNetCIDRDenylist           = ffc("config.global.net.cidrDenylist", "A list of CIDR ranges to which outbound connections are blocked, as a core SSRF mitigation. Empty by default.", ArrayStringType)
 	ConfigGlobalMethod                    = ffc("config.global.method", "The HTTP method to use when making requests to the Address Resolver", StringType)
 	ConfigGlobalAuthType                  = ffc("config.global.auth.type", "The auth plugin to use for server side authentication of requests", StringType)
 	ConfigGlobalPassthroughHeadersEnabled = ffc("config.global.passthroughHeadersEnabled", "Enable passing through the set of allowed HTTP request headers", BooleanType)
