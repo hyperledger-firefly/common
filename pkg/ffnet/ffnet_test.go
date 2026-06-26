@@ -175,6 +175,19 @@ func TestNewDialerAllowsAndConnects(t *testing.T) {
 	_ = conn.Close()
 }
 
+func TestConfigKeysDocumented(t *testing.T) {
+	// Initialize the net config as a subsection (as ffresty does), then generate the config
+	// markdown for every known key. This panics if any key is missing a translation, guarding
+	// against the "Translation for config key '...net.cidrDenylist' was not found" regression.
+	config.RootConfigReset()
+	InitConfig(config.RootSection("backend").SubSection("net"))
+
+	assert.NotPanics(t, func() {
+		_, err := config.GenerateConfigMarkdown(context.Background(), "", config.GetKnownKeys())
+		assert.NoError(t, err)
+	})
+}
+
 func TestGenerateConfigDenylistFromConfig(t *testing.T) {
 	resetConf()
 	ipv4PrivateCIDRs := []string{
