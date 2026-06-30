@@ -146,3 +146,22 @@ func TestGetStrictExpiry(t *testing.T) {
 
 	assert.NotNil(t, cache1.Get("test"))
 }
+
+func TestGetStringConcurrentDelete(t *testing.T) {
+	c := NewUmanagedCache(context.Background(), 1024, time.Minute)
+	c.SetString("key", "value")
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 10000; i++ {
+			_ = c.GetString("key")
+		}
+	}()
+
+	for i := 0; i < 10000; i++ {
+		c.SetString("key", "value")
+		c.Delete("key")
+	}
+	<-done
+}
