@@ -230,7 +230,14 @@ type OpenAPITagHandler struct {
 
 func (th *OpenAPITagHandler) HandleFFTags(ctx context.Context, route *Route, name string, tag reflect.StructTag, schema *openapi3.Schema) error {
 	if ffEnum := tag.Get("ffenum"); ffEnum != "" {
-		schema.Enum = fftypes.FFEnumValues(ffEnum)
+		// For a container field (e.g. []FFEnum or map[string]FFEnum) the openapi3gen library
+		// invokes this customizer with the same field tag for both the container schema and its
+		// element schema (array items / map additionalProperties). FFEnum values are always
+		// strings, so the enum belongs only on the string leaf - applying it to the "array" or
+		// "object" container node too produces invalid OpenAPI that strict SDK generators reject.
+		if schema.Type.Is(openapi3.TypeString) {
+			schema.Enum = fftypes.FFEnumValues(ffEnum)
+		}
 	}
 	if ffExtensions := tag.Get("ffschemaext"); ffExtensions != "" {
 		if err := applyFFExtensionsTag(ctx, schema, ffExtensions); err != nil {
