@@ -23,6 +23,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -594,4 +595,52 @@ func TestGetBigInt(t *testing.T) {
 	expectedSection := big.NewInt(0)
 	expectedSection.SetString("98765432109876543210", 10)
 	assert.Equal(t, expectedSection, resultSection)
+}
+
+// TestConcurrentAccessNoRace exercises the config accessors and mutators concurrently
+// to ensure every path that touches the global viper singleton does so under keysMutex.
+// Prior to the fix, AddKnownKey/SetDefault (viper writes) and ArraySize (viper read) ran
+// without the lock, racing the locked Get* readers and triggering the runtime
+// "concurrent map read and map write" fatal. Run with -race to validate.
+func TestConcurrentAccessNoRace(t *testing.T) {
+	defer RootConfigReset()
+	RootConfigReset()
+
+	section := RootSection("concurrent")
+	// Pre-register a key so the readers below always target a known key.
+	section.AddKnownKey("seed", true)
+	arr := section.SubArray("things")
+	arr.AddKnownKey("name", "default")
+
+	const workers = 8
+	const iterations = 200
+	var wg sync.WaitGroup
+
+	// Writers: register new known keys/defaults, which write to viper.
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func(w int) {
+			defer wg.Done()
+			for i := 0; i < iterations; i++ {
+				section.AddKnownKey(fmt.Sprintf("key.%d.%d", w, i), i)
+				section.SetDefault(fmt.Sprintf("def.%d.%d", w, i), i)
+				arr.SetDefault(fmt.Sprintf("adef.%d.%d", w, i), i)
+			}
+		}(w)
+	}
+
+	// Readers: read config values, including the array size read path.
+	for r := 0; r < workers; r++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < iterations; i++ {
+				_ = section.GetBool("seed")
+				_ = arr.ArraySize()
+				_ = GetBool(LogJSONEnabled)
+			}
+		}()
+	}
+
+	wg.Wait()
 }

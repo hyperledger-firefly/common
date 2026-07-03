@@ -198,7 +198,9 @@ func WatchConfig(ctx context.Context, onChange, onClose func()) error {
 	// removed event comes from the filesystem, before the create/update event(s).
 	// The listener just ends in that case, and stops notifying of events :shrug
 
+	keysMutex.Lock() // must only call viper directly here (as we already hold the lock)
 	fullConfigFilePath := viper.ConfigFileUsed()
+	keysMutex.Unlock()
 	return fswatcher.Watch(ctx, fullConfigFilePath, onChange, onClose)
 }
 
@@ -370,6 +372,9 @@ func (c *configArray) SubArray(name string) ArraySection {
 }
 
 func (c *configArray) ArraySize() int {
+	keysMutex.Lock()
+	defer keysMutex.Unlock()
+
 	val := viper.Get(c.base)
 	vt := reflect.TypeOf(val)
 	if vt != nil && (vt.Kind() == reflect.Slice || vt.Kind() == reflect.Map) {
@@ -412,14 +417,15 @@ func (c *configArray) AddKnownKey(k string, defValue ...interface{}) {
 }
 
 func (c *configSection) AddKnownKey(k string, defValue ...interface{}) {
+	keysMutex.Lock() // must only call viper directly here (as we already hold the lock)
+	defer keysMutex.Unlock()
+
 	key := keyName(c.prefix, k)
 	if len(defValue) == 1 {
-		c.SetDefault(k, defValue[0])
+		c.setDefault(k, defValue[0])
 	} else if len(defValue) > 0 {
-		c.SetDefault(k, defValue)
+		c.setDefault(k, defValue)
 	}
-	keysMutex.Lock()
-	defer keysMutex.Unlock()
 	knownKeys[key] = true
 
 	if c.parent != nil {
@@ -448,12 +454,23 @@ func (c *configSection) AddChild(k string, defValue ...interface{}) {
 }
 
 func (c *configSection) SetDefault(k string, defValue interface{}) {
+	keysMutex.Lock() // must only call viper directly here (as we already hold the lock)
+	defer keysMutex.Unlock()
+
+	c.setDefault(k, defValue)
+}
+
+// setDefault sets the default directly in viper. Caller must hold keysMutex.
+func (c *configSection) setDefault(k string, defValue interface{}) {
 	key := keyName(c.prefix, k)
 	viper.SetDefault(key, defValue)
 	c.AddChild(key, defValue)
 }
 
 func (c *configArray) SetDefault(k string, defValue interface{}) {
+	keysMutex.Lock() // must only call viper directly here (as we already hold the lock)
+	defer keysMutex.Unlock()
+
 	key := keyName(c.base+"[]", k)
 	viper.SetDefault(key, defValue)
 	c.AddChild(key, defValue)
