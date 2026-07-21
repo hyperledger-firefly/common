@@ -38,17 +38,18 @@ type FFIReference struct {
 }
 
 type FFI struct {
-	ID          *UUID        `ffstruct:"FFI" json:"id,omitempty" ffexcludeinput:"true"`
-	Message     *UUID        `ffstruct:"FFI" json:"message,omitempty" ffexcludeinput:"true"`
-	Namespace   string       `ffstruct:"FFI" json:"namespace,omitempty" ffexcludeinput:"true"`
-	Name        string       `ffstruct:"FFI" json:"name"`
-	NetworkName string       `ffstruct:"FFI" json:"networkName,omitempty"`
-	Description string       `ffstruct:"FFI" json:"description"`
-	Version     string       `ffstruct:"FFI" json:"version"`
-	Methods     []*FFIMethod `ffstruct:"FFI" json:"methods,omitempty"`
-	Events      []*FFIEvent  `ffstruct:"FFI" json:"events,omitempty"`
-	Errors      []*FFIError  `ffstruct:"FFI" json:"errors,omitempty"`
-	Published   bool         `ffstruct:"FFI" json:"published" ffexcludeinput:"true"`
+	ID          *UUID         `ffstruct:"FFI" json:"id,omitempty" ffexcludeinput:"true"`
+	Message     *UUID         `ffstruct:"FFI" json:"message,omitempty" ffexcludeinput:"true"`
+	Namespace   string        `ffstruct:"FFI" json:"namespace,omitempty" ffexcludeinput:"true"`
+	Name        string        `ffstruct:"FFI" json:"name"`
+	NetworkName string        `ffstruct:"FFI" json:"networkName,omitempty"`
+	Description string        `ffstruct:"FFI" json:"description"`
+	Version     string        `ffstruct:"FFI" json:"version"`
+	Methods     []*FFIMethod  `ffstruct:"FFI" json:"methods,omitempty"`
+	Events      []*FFIEvent   `ffstruct:"FFI" json:"events,omitempty"`
+	Errors      []*FFIError   `ffstruct:"FFI" json:"errors,omitempty"`
+	Published   bool          `ffstruct:"FFI" json:"published" ffexcludeinput:"true"`
+	Topics      FFStringArray `ffstruct:"FFI" json:"topics,omitempty"`
 }
 
 type FFIMethod struct {
