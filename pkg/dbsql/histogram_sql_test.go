@@ -22,8 +22,8 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	sq "github.com/Masterminds/squirrel"
-	"github.com/hyperledger/firefly-common/pkg/config"
-	"github.com/hyperledger/firefly-common/pkg/fftypes"
+	"github.com/hyperledger-firefly/common/pkg/config"
+	"github.com/hyperledger-firefly/common/pkg/fftypes"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -81,9 +81,9 @@ func TestBuildHistogramQueriesWithoutTypeOrNamespace(t *testing.T) {
 	queries := db.buildHistogramQueries(
 		"mytable",
 		"created",
-		"", 
-		"", 
-		"", 
+		"",
+		"",
+		"",
 		i,
 		5,
 	)
@@ -211,9 +211,9 @@ func TestGetChartHistogramNoTypeColumn(t *testing.T) {
 		ctx,
 		"hist_table",
 		"created",
-		"", 
-		"", 
-		"", 
+		"",
+		"",
+		"",
 		i,
 	)
 	assert.NoError(t, err)
@@ -253,8 +253,8 @@ func TestGetChartHistogramWithTypeColumn(t *testing.T) {
 		"hist_table",
 		"created",
 		"type",
-		"", 
-		"", 
+		"",
+		"",
 		i,
 	)
 	assert.NoError(t, err)
