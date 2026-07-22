@@ -37,6 +37,8 @@ const (
 	SQLConfMaxIdleConns = "maxIdleConns"
 	// SQLConfMaxConnLifetime maximum connections to the database
 	SQLConfMaxConnLifetime = "maxConnLifetime"
+	// SQLConfHistogramsMaxChartRows maximum rows to fetch
+	SQLConfHistogramsMaxChartRows = "histograms.maxChartRows"
 )
 
 const (
@@ -51,4 +53,5 @@ func (s *Database) InitConfig(provider Provider, config config.Section) {
 	config.AddKnownKey(SQLConfMaxConnIdleTime, "1m")
 	config.AddKnownKey(SQLConfMaxIdleConns) // defaults to the max connections
 	config.AddKnownKey(SQLConfMaxConnLifetime)
+	config.AddKnownKey(SQLConfHistogramsMaxChartRows, 100) // as per ff core
 }
