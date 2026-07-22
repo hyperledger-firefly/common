@@ -26,9 +26,9 @@ import (
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/ghodss/yaml"
-	"github.com/hyperledger/firefly-common/pkg/config"
-	"github.com/hyperledger/firefly-common/pkg/fftypes"
-	"github.com/hyperledger/firefly-common/pkg/i18n"
+	"github.com/hyperledger-firefly/common/pkg/config"
+	"github.com/hyperledger-firefly/common/pkg/fftypes"
+	"github.com/hyperledger-firefly/common/pkg/i18n"
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/text/language"
 )
@@ -58,10 +58,12 @@ type TestEmbedded1 struct {
 }
 
 type TestStruct2 struct {
-	Enum1    TestEnum         `ffstruct:"ut1" json:"enum1" ffenum:"ut"`
-	String1  string           `ffstruct:"ut1" json:"string1"`
-	String2  string           `ffstruct:"ut1" json:"string2"`
-	JSONAny1 *fftypes.JSONAny `ffstruct:"ut1" json:"jsonAny1,omitempty"`
+	Enum1     TestEnum            `ffstruct:"ut1" json:"enum1" ffenum:"ut"`
+	EnumArray []TestEnum          `ffstruct:"ut1" json:"enumArray" ffenum:"ut"`
+	EnumMap   map[string]TestEnum `ffstruct:"ut1" json:"enumMap" ffenum:"ut"`
+	String1   string              `ffstruct:"ut1" json:"string1"`
+	String2   string              `ffstruct:"ut1" json:"string2"`
+	JSONAny1  *fftypes.JSONAny    `ffstruct:"ut1" json:"jsonAny1,omitempty"`
 }
 
 type TestExtensions struct {
@@ -208,17 +210,16 @@ var testRoutes = []*Route{
 		Tag: example2TagName,
 	},
 	{
-		Name:       "op8",
-		Path:       "example8",
-		Method:     http.MethodGet,
-		PathParams: nil,
-		QueryParams: nil,
-		Description: ExampleDesc,
-		JSONInputValue: func() interface{} { return nil},
+		Name:            "op8",
+		Path:            "example8",
+		Method:          http.MethodGet,
+		PathParams:      nil,
+		QueryParams:     nil,
+		Description:     ExampleDesc,
+		JSONInputValue:  func() interface{} { return nil },
 		JSONOutputValue: func() interface{} { return &TestExtensions{} },
 		JSONOutputCodes: []int{http.StatusOK},
 	},
-
 }
 
 type TestInOutType struct {
@@ -608,10 +609,10 @@ func TestExcludeFromOpenAPI(t *testing.T) {
 func TestExtensionsBadEncodingFail(t *testing.T) {
 	routes := []*Route{
 		{
-			Name:           "badEncoding",
-			Path:           "extensions",
-			Method:         http.MethodGet,
-			JSONInputValue: func() interface{} { return nil },
+			Name:            "badEncoding",
+			Path:            "extensions",
+			Method:          http.MethodGet,
+			JSONInputValue:  func() interface{} { return nil },
 			JSONOutputValue: func() interface{} { return &TestExtensionsBadEncoding{} },
 			JSONOutputCodes: []int{http.StatusOK},
 		},
@@ -629,10 +630,10 @@ func TestExtensionsBadEncodingFail(t *testing.T) {
 func TestExtensionsBadKeyFail(t *testing.T) {
 	routes := []*Route{
 		{
-			Name:           "bad3",
-			Path:           "extensions",
-			Method:         http.MethodGet,
-			JSONInputValue: func() interface{} { return nil },
+			Name:            "bad3",
+			Path:            "extensions",
+			Method:          http.MethodGet,
+			JSONInputValue:  func() interface{} { return nil },
 			JSONOutputValue: func() interface{} { return &TestExtensionsBadKey{} },
 			JSONOutputCodes: []int{http.StatusOK},
 		},
@@ -645,4 +646,73 @@ func TestExtensionsBadKeyFail(t *testing.T) {
 			BaseURL: "http://localhost:12345/api/v1",
 		}).Generate(context.Background(), routes)
 	})
+}
+
+func TestOpenAPIVersion(t *testing.T) {
+	doc := NewSwaggerGen(&SwaggerGenOptions{
+		Title:          "UnitTest",
+		Version:        "1.0",
+		OpenAPIVersion: "3.1.1",
+		BaseURL:        "http://localhost:12345/api/v1",
+	}).Generate(context.Background(), testRoutes)
+	err := doc.Validate(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, "3.1.1", doc.OpenAPI)
+}
+
+func TestEnumArrayNotAppliedToArraySchema(t *testing.T) {
+	// Regression test: for a slice-of-enum field the enum must be applied only to the
+	// items schema, not the array schema itself. An "enum" on a "type: array" node is
+	// invalid OpenAPI and breaks strict SDK generators.
+	routes := []*Route{
+		{
+			Name:            "EnumArrayTest",
+			Path:            "example1/test",
+			Method:          http.MethodPost,
+			JSONInputValue:  func() interface{} { return &TestStruct1{} },
+			JSONOutputCodes: []int{http.StatusOK},
+		},
+	}
+	doc := NewSwaggerGen(&SwaggerGenOptions{
+		Title:   "UnitTest",
+		Version: "1.0",
+		BaseURL: "http://localhost:12345/api/v1",
+	}).Generate(context.Background(), routes)
+	require.NoError(t, doc.Validate(context.Background()))
+
+	props := doc.Paths.Find("/example1/test").Post.RequestBody.Value.
+		Content.Get("application/json").Schema.Value.Properties
+	struct2 := props["struct2"].Value
+	wantEnum := fftypes.FFEnumValues("ut")
+
+	// 1. Scalar enum (type: string) - enum applied directly on the leaf
+	scalar := struct2.Properties["enum1"].Value
+	assert.True(t, scalar.Type.Is(openapi3.TypeString))
+	assert.Equal(t, wantEnum, scalar.Enum)
+
+	// 2. Array of enum (type: array) - enum ONLY on items, never on the array container
+	enumArray := struct2.Properties["enumArray"].Value
+	assert.True(t, enumArray.Type.Is(openapi3.TypeArray))
+	assert.Nil(t, enumArray.Enum, "enum must not be set on a type:array node")
+	require.NotNil(t, enumArray.Items)
+	assert.True(t, enumArray.Items.Value.Type.Is(openapi3.TypeString))
+	assert.Equal(t, wantEnum, enumArray.Items.Value.Enum)
+
+	// 3. Map of enum (type: object) - enum ONLY on additionalProperties, never on the object container
+	enumMap := struct2.Properties["enumMap"].Value
+	assert.True(t, enumMap.Type.Is(openapi3.TypeObject))
+	assert.Nil(t, enumMap.Enum, "enum must not be set on a type:object node")
+	require.NotNil(t, enumMap.AdditionalProperties.Schema)
+	assert.True(t, enumMap.AdditionalProperties.Schema.Value.Type.Is(openapi3.TypeString))
+	assert.Equal(t, wantEnum, enumMap.AdditionalProperties.Schema.Value.Enum)
+
+	// 4. Non-enum fields of every kind must never gain an enum
+	for name, ref := range struct2.Properties {
+		switch name {
+		case "enum1", "enumArray", "enumMap":
+			continue
+		default:
+			assert.Nil(t, ref.Value.Enum, "unexpected enum on non-enum field %q", name)
+		}
+	}
 }

@@ -25,10 +25,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/hyperledger/firefly-common/pkg/ffapi"
-	"github.com/hyperledger/firefly-common/pkg/ffresty"
-	"github.com/hyperledger/firefly-common/pkg/fftls"
-	"github.com/hyperledger/firefly-common/pkg/wsserver"
+	"github.com/hyperledger-firefly/common/pkg/ffapi"
+	"github.com/hyperledger-firefly/common/pkg/ffresty"
+	"github.com/hyperledger-firefly/common/pkg/fftls"
+	"github.com/hyperledger-firefly/common/pkg/wsserver"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )

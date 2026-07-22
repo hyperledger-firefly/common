@@ -34,6 +34,10 @@ type SQLFeatures struct {
 	// DB specific query builder for RDBMS-side optimized upsert, returning the requested column from the query
 	// (the CRUD layer will request the create time column to detect if the record was new or not)
 	DBOptimizedUpsertBuilder func(ctx context.Context, table string, idColumn string, insertCols, updateCols []string, returnCol string, values map[string]driver.Value) (sq.InsertBuilder, error)
+	// MaxPlaceholders caps the number of SQL placeholders ($N) in a single statement.
+	// When >0 and MultiRowInsert is true, InsertMany will chunk rows so that
+	// rows*columns never exceeds this limit. PostgreSQL's wire protocol limit is 65535.
+	MaxPlaceholders int
 }
 
 func DefaultSQLProviderFeatures() SQLFeatures {

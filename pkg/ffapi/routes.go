@@ -22,8 +22,8 @@ import (
 	"net/http"
 
 	"github.com/getkin/kin-openapi/openapi3"
-	"github.com/hyperledger/firefly-common/pkg/config"
-	"github.com/hyperledger/firefly-common/pkg/i18n"
+	"github.com/hyperledger-firefly/common/pkg/config"
+	"github.com/hyperledger-firefly/common/pkg/i18n"
 )
 
 // SchemaGenerator is passed into the JSONInputSchema advanced customization function, to give

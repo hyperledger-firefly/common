@@ -21,7 +21,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 
-	"github.com/hyperledger/firefly-common/pkg/i18n"
+	"github.com/hyperledger-firefly/common/pkg/i18n"
 	"github.com/santhosh-tekuri/jsonschema/v5"
 )
 

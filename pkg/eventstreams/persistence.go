@@ -20,9 +20,9 @@ import (
 	"context"
 
 	sq "github.com/Masterminds/squirrel"
-	"github.com/hyperledger/firefly-common/pkg/dbsql"
-	"github.com/hyperledger/firefly-common/pkg/ffapi"
-	"github.com/hyperledger/firefly-common/pkg/fftypes"
+	"github.com/hyperledger-firefly/common/pkg/dbsql"
+	"github.com/hyperledger-firefly/common/pkg/ffapi"
+	"github.com/hyperledger-firefly/common/pkg/fftypes"
 )
 
 type Persistence[CT EventStreamSpec] interface {

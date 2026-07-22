@@ -6,7 +6,7 @@ import (
 	context "context"
 	http "net/http"
 
-	metric "github.com/hyperledger/firefly-common/pkg/metric"
+	metric "github.com/hyperledger-firefly/common/pkg/metric"
 	mock "github.com/stretchr/testify/mock"
 
 	prometheus "github.com/prometheus/client_golang/prometheus"

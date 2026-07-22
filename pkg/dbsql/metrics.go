@@ -20,8 +20,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/hyperledger/firefly-common/pkg/log"
-	"github.com/hyperledger/firefly-common/pkg/metric"
+	"github.com/hyperledger-firefly/common/pkg/log"
+	"github.com/hyperledger-firefly/common/pkg/metric"
 )
 
 const (

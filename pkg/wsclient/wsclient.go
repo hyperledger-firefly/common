@@ -1,4 +1,4 @@
-// Copyright © 2024 Kaleido, Inc.
+// Copyright © 2026 Kaleido, Inc.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -22,6 +22,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -29,11 +30,11 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/hyperledger/firefly-common/pkg/ffresty"
-	"github.com/hyperledger/firefly-common/pkg/fftypes"
-	"github.com/hyperledger/firefly-common/pkg/i18n"
-	"github.com/hyperledger/firefly-common/pkg/log"
-	"github.com/hyperledger/firefly-common/pkg/retry"
+	"github.com/hyperledger-firefly/common/pkg/ffresty"
+	"github.com/hyperledger-firefly/common/pkg/fftypes"
+	"github.com/hyperledger-firefly/common/pkg/i18n"
+	"github.com/hyperledger-firefly/common/pkg/log"
+	"github.com/hyperledger-firefly/common/pkg/retry"
 	"golang.org/x/time/rate"
 )
 
@@ -57,6 +58,10 @@ type WSConfig struct {
 	HeartbeatInterval         time.Duration      `json:"heartbeatInterval,omitempty"`
 	TLSClientConfig           *tls.Config        `json:"tlsClientConfig,omitempty"`
 	ConnectionTimeout         time.Duration      `json:"connectionTimeout,omitempty"`
+	// NetDialer carries the custom DNS resolver and SSRF egress guard (CIDR denylist) for the
+	// underlying TCP connection. Built by GenerateConfig from the net config; cannot be set in
+	// JSON. Left nil for hand-built configs, in which case the default net dialer is used.
+	NetDialer *net.Dialer `json:"-"`
 	// This one cannot be set in JSON - must be configured on the code interface
 	ReceiveExt bool
 }
@@ -143,15 +148,22 @@ func New(ctx context.Context, config *WSConfig, beforeConnect WSPreConnectHandle
 		return nil, err
 	}
 
+	wsDialer := &websocket.Dialer{
+		ReadBufferSize:   config.ReadBufferSize,
+		WriteBufferSize:  config.WriteBufferSize,
+		TLSClientConfig:  config.TLSClientConfig,
+		HandshakeTimeout: config.ConnectionTimeout,
+	}
+	// Route the TCP connection through the configured dialer so the custom DNS resolver and
+	// SSRF egress guard apply (TLS is still layered on top by gorilla via TLSClientConfig).
+	if config.NetDialer != nil {
+		wsDialer.NetDialContext = config.NetDialer.DialContext
+	}
+
 	w := &wsClient{
-		ctx: ctx,
-		url: wsURL,
-		wsdialer: &websocket.Dialer{
-			ReadBufferSize:   config.ReadBufferSize,
-			WriteBufferSize:  config.WriteBufferSize,
-			TLSClientConfig:  config.TLSClientConfig,
-			HandshakeTimeout: config.ConnectionTimeout,
-		},
+		ctx:      ctx,
+		url:      wsURL,
+		wsdialer: wsDialer,
 		connRetry: retry.Retry{
 			InitialDelay: config.InitialDelay,
 			MaximumDelay: config.MaximumDelay,

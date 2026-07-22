@@ -1,4 +1,4 @@
-// Copyright © 2023 Kaleido, Inc.
+// Copyright © 2026 Kaleido, Inc.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -20,9 +20,11 @@ import (
 	"context"
 	"time"
 
-	"github.com/hyperledger/firefly-common/pkg/config"
-	"github.com/hyperledger/firefly-common/pkg/ffresty"
-	"github.com/hyperledger/firefly-common/pkg/fftls"
+	"github.com/hyperledger-firefly/common/pkg/config"
+	"github.com/hyperledger-firefly/common/pkg/ffdns"
+	"github.com/hyperledger-firefly/common/pkg/ffnet"
+	"github.com/hyperledger-firefly/common/pkg/ffresty"
+	"github.com/hyperledger-firefly/common/pkg/fftls"
 )
 
 const (
@@ -108,6 +110,26 @@ func GenerateConfig(ctx context.Context, conf config.Section) (*WSConfig, error)
 	}
 
 	wsConfig.TLSClientConfig = tlsClientConfig
+
+	// Build the underlying TCP dialer with the custom DNS resolver and SSRF egress guard,
+	// from the same "net" subsection that ffresty.InitConfig set up on this config tree.
+	netCfg, err := ffnet.GenerateConfig(conf.SubSection("net"))
+	if err != nil {
+		return nil, err
+	}
+
+	dnsCfg, err := ffdns.GenerateConfig(conf.SubSection("dns"))
+	if err != nil {
+		return nil, err
+	}
+	resolver := ffdns.NewResolverWithConfig(dnsCfg)
+
+	netDialer, err := ffnet.NewDialer(ctx, netCfg, resolver)
+	if err != nil {
+		return nil, err
+	}
+	netDialer.Timeout = wsConfig.ConnectionTimeout
+	wsConfig.NetDialer = netDialer
 
 	return wsConfig, nil
 }

@@ -5,7 +5,7 @@ package wsservermocks
 import (
 	context "context"
 
-	wsserver "github.com/hyperledger/firefly-common/pkg/wsserver"
+	wsserver "github.com/hyperledger-firefly/common/pkg/wsserver"
 	mock "github.com/stretchr/testify/mock"
 )
 

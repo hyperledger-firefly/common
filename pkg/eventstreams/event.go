@@ -19,7 +19,7 @@ package eventstreams
 import (
 	"encoding/json"
 
-	"github.com/hyperledger/firefly-common/pkg/wsserver"
+	"github.com/hyperledger-firefly/common/pkg/wsserver"
 )
 
 const MessageTypeEventBatch = "event_batch"

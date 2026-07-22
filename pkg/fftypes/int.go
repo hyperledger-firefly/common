@@ -22,7 +22,7 @@ import (
 	"math/big"
 	"strconv"
 
-	"github.com/hyperledger/firefly-common/pkg/i18n"
+	"github.com/hyperledger-firefly/common/pkg/i18n"
 )
 
 // FFuint64 on the API are serialized as Base10 strings, and can be parsed from multiple bases

@@ -28,10 +28,10 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/Masterminds/squirrel"
 	sq "github.com/Masterminds/squirrel"
-	"github.com/hyperledger/firefly-common/pkg/config"
-	"github.com/hyperledger/firefly-common/pkg/ffapi"
-	"github.com/hyperledger/firefly-common/pkg/fftypes"
-	"github.com/hyperledger/firefly-common/pkg/log"
+	"github.com/hyperledger-firefly/common/pkg/config"
+	"github.com/hyperledger-firefly/common/pkg/ffapi"
+	"github.com/hyperledger-firefly/common/pkg/fftypes"
+	"github.com/hyperledger-firefly/common/pkg/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -1010,6 +1010,80 @@ func TestInsertManyMultiRowFail(t *testing.T) {
 		{ResourceBase: ResourceBase{ID: fftypes.NewUUID()}},
 	}, false)
 	assert.Regexp(t, "FF00177", err)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestInsertManyMultiRowChunkedOK(t *testing.T) {
+	mp := NewMockProvider()
+	mp.MultiRowInsert = true
+	mp.MaxPlaceholders = 22 // 11 columns per row, so 2 rows per chunk
+	db, mock := mp.UTInit()
+	db.FakePSQLInsert = true
+	tc := newCRUDCollection(&db.Database, "ns1")
+	mock.ExpectBegin()
+	// First chunk: 2 rows
+	mock.ExpectQuery(`INSERT INTO crudables.*VALUES \(.*\),\(.*\)`).WillReturnRows(
+		sqlmock.NewRows([]string{db.sequenceColumn}).
+			AddRow(101).
+			AddRow(102),
+	)
+	// Second chunk: 1 row
+	mock.ExpectQuery(`INSERT INTO crudables.*VALUES \(.*\)`).WillReturnRows(
+		sqlmock.NewRows([]string{db.sequenceColumn}).
+			AddRow(103),
+	)
+	mock.ExpectCommit()
+	err := tc.InsertMany(context.Background(), []*TestCRUDable{
+		{ResourceBase: ResourceBase{ID: fftypes.NewUUID()}},
+		{ResourceBase: ResourceBase{ID: fftypes.NewUUID()}},
+		{ResourceBase: ResourceBase{ID: fftypes.NewUUID()}},
+	}, false)
+	assert.NoError(t, err)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestInsertManyMultiRowChunkedFailSecondChunk(t *testing.T) {
+	mp := NewMockProvider()
+	mp.MultiRowInsert = true
+	mp.MaxPlaceholders = 22
+	db, mock := mp.UTInit()
+	db.FakePSQLInsert = true
+	tc := newCRUDCollection(&db.Database, "ns1")
+	mock.ExpectBegin()
+	mock.ExpectQuery(`INSERT INTO crudables.*VALUES \(.*\),\(.*\)`).WillReturnRows(
+		sqlmock.NewRows([]string{db.sequenceColumn}).
+			AddRow(101).
+			AddRow(102),
+	)
+	mock.ExpectQuery(`INSERT INTO crudables.*VALUES \(.*\)`).WillReturnError(fmt.Errorf("pop"))
+	err := tc.InsertMany(context.Background(), []*TestCRUDable{
+		{ResourceBase: ResourceBase{ID: fftypes.NewUUID()}},
+		{ResourceBase: ResourceBase{ID: fftypes.NewUUID()}},
+		{ResourceBase: ResourceBase{ID: fftypes.NewUUID()}},
+	}, false)
+	assert.Regexp(t, "FF00177", err)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestInsertManyMultiRowNoChunkingWhenUnderLimit(t *testing.T) {
+	mp := NewMockProvider()
+	mp.MultiRowInsert = true
+	mp.MaxPlaceholders = 100 // 11 columns * 2 rows = 22, well under 100
+	db, mock := mp.UTInit()
+	db.FakePSQLInsert = true
+	tc := newCRUDCollection(&db.Database, "ns1")
+	mock.ExpectBegin()
+	mock.ExpectQuery(`INSERT INTO crudables.*VALUES \(.*\),\(.*\)`).WillReturnRows(
+		sqlmock.NewRows([]string{db.sequenceColumn}).
+			AddRow(201).
+			AddRow(202),
+	)
+	mock.ExpectCommit()
+	err := tc.InsertMany(context.Background(), []*TestCRUDable{
+		{ResourceBase: ResourceBase{ID: fftypes.NewUUID()}},
+		{ResourceBase: ResourceBase{ID: fftypes.NewUUID()}},
+	}, false)
+	assert.NoError(t, err)
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
 

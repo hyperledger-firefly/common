@@ -25,10 +25,10 @@ import (
 	"strings"
 
 	sq "github.com/Masterminds/squirrel"
-	"github.com/hyperledger/firefly-common/pkg/ffapi"
-	"github.com/hyperledger/firefly-common/pkg/fftypes"
-	"github.com/hyperledger/firefly-common/pkg/i18n"
-	"github.com/hyperledger/firefly-common/pkg/log"
+	"github.com/hyperledger-firefly/common/pkg/ffapi"
+	"github.com/hyperledger-firefly/common/pkg/fftypes"
+	"github.com/hyperledger-firefly/common/pkg/i18n"
+	"github.com/hyperledger-firefly/common/pkg/log"
 )
 
 const (
@@ -497,35 +497,10 @@ func (c *CrudBase[T]) InsertMany(ctx context.Context, instances []T, allowPartia
 	}
 	defer c.DB.RollbackTx(ctx, tx, autoCommit)
 	if c.DB.Features().MultiRowInsert {
-		insert := sq.Insert(c.Table).Columns(c.Columns...)
-		for _, inst := range instances {
-			c.setInsertTimestamps(inst, fftypes.Now())
-			values := make([]interface{}, len(c.Columns))
-			for i, col := range c.Columns {
-				values[i] = c.getFieldValue(inst, col)
-			}
-			insert = insert.Values(values...)
-		}
-
-		// Use a single multi-row insert
-		sequences := make([]int64, len(instances))
-		err := c.DB.InsertTxRows(ctx, c.Table, tx, insert, func() {
-			for _, inst := range instances {
-				if c.EventHandler != nil {
-					c.EventHandler(inst.GetID(), Created)
-				}
-			}
-		}, sequences, allowPartialSuccess)
-		if err != nil {
+		if err := c.insertManyMultiRow(ctx, tx, instances, allowPartialSuccess); err != nil {
 			return err
 		}
-		if len(sequences) == len(instances) {
-			for i, seq := range sequences {
-				c.attemptSetSequence(instances[i], seq)
-			}
-		}
 	} else {
-		// Fall back to individual inserts grouped in a TX
 		for _, inst := range instances {
 			err := c.attemptInsert(ctx, tx, inst, false)
 			if err != nil {
@@ -540,6 +515,49 @@ func (c *CrudBase[T]) InsertMany(ctx context.Context, instances []T, allowPartia
 
 	return c.DB.CommitTx(ctx, tx, autoCommit)
 
+}
+
+func (c *CrudBase[T]) insertManyMultiRow(ctx context.Context, tx *TXWrapper, instances []T, allowPartialSuccess bool) error {
+	chunkSize := len(instances)
+	if maxPlaceholders := c.DB.Features().MaxPlaceholders; maxPlaceholders > 0 && len(c.Columns) > 0 {
+		chunkSize = maxPlaceholders / len(c.Columns)
+	}
+
+	allSequences := make([]int64, len(instances))
+	for offset := 0; offset < len(instances); offset += chunkSize {
+		end := offset + chunkSize
+		if end > len(instances) {
+			end = len(instances)
+		}
+		chunk := instances[offset:end]
+
+		insert := sq.Insert(c.Table).Columns(c.Columns...)
+		for _, inst := range chunk {
+			c.setInsertTimestamps(inst, fftypes.Now())
+			values := make([]interface{}, len(c.Columns))
+			for i, col := range c.Columns {
+				values[i] = c.getFieldValue(inst, col)
+			}
+			insert = insert.Values(values...)
+		}
+
+		sequences := allSequences[offset:end]
+		err := c.DB.InsertTxRows(ctx, c.Table, tx, insert, func() {
+			for _, inst := range chunk {
+				if c.EventHandler != nil {
+					c.EventHandler(inst.GetID(), Created)
+				}
+			}
+		}, sequences, allowPartialSuccess)
+		if err != nil {
+			return err
+		}
+	}
+
+	for i, seq := range allSequences {
+		c.attemptSetSequence(instances[i], seq)
+	}
+	return nil
 }
 
 func (c *CrudBase[T]) Insert(ctx context.Context, inst T, hooks ...PostCompletionHook) (err error) {

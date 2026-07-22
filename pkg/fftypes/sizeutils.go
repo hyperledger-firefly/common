@@ -20,7 +20,7 @@ import (
 	"context"
 
 	"github.com/docker/go-units"
-	"github.com/hyperledger/firefly-common/pkg/log"
+	"github.com/hyperledger-firefly/common/pkg/log"
 )
 
 // ParseToByteSize is a standard handling of a number of bytes, in config or API options

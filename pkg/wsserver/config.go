@@ -19,7 +19,7 @@ package wsserver
 import (
 	"time"
 
-	"github.com/hyperledger/firefly-common/pkg/config"
+	"github.com/hyperledger-firefly/common/pkg/config"
 )
 
 type WebSocketServerConfig struct {

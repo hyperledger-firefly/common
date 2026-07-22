@@ -22,8 +22,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hyperledger/firefly-common/mocks/metricmocks"
-	"github.com/hyperledger/firefly-common/pkg/metric"
+	"github.com/hyperledger-firefly/common/mocks/metricmocks"
+	"github.com/hyperledger-firefly/common/pkg/metric"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )

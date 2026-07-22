@@ -19,10 +19,10 @@ package authfactory
 import (
 	"context"
 
-	"github.com/hyperledger/firefly-common/pkg/auth"
-	"github.com/hyperledger/firefly-common/pkg/auth/basic"
-	"github.com/hyperledger/firefly-common/pkg/config"
-	"github.com/hyperledger/firefly-common/pkg/i18n"
+	"github.com/hyperledger-firefly/common/pkg/auth"
+	"github.com/hyperledger-firefly/common/pkg/auth/basic"
+	"github.com/hyperledger-firefly/common/pkg/config"
+	"github.com/hyperledger-firefly/common/pkg/i18n"
 )
 
 const (

@@ -40,11 +40,13 @@ import (
 	"time"
 
 	"github.com/go-resty/resty/v2"
-	"github.com/hyperledger/firefly-common/pkg/config"
-	"github.com/hyperledger/firefly-common/pkg/ffapi"
-	"github.com/hyperledger/firefly-common/pkg/fftls"
-	"github.com/hyperledger/firefly-common/pkg/i18n"
-	"github.com/hyperledger/firefly-common/pkg/metric"
+	"github.com/hyperledger-firefly/common/pkg/config"
+	"github.com/hyperledger-firefly/common/pkg/ffapi"
+	"github.com/hyperledger-firefly/common/pkg/ffdns"
+	"github.com/hyperledger-firefly/common/pkg/ffnet"
+	"github.com/hyperledger-firefly/common/pkg/fftls"
+	"github.com/hyperledger-firefly/common/pkg/i18n"
+	"github.com/hyperledger-firefly/common/pkg/metric"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
 
@@ -818,4 +820,46 @@ func TestTrace(t *testing.T) {
 	require.Equal(t, "", traceBody(nil))
 	require.JSONEq(t, `{"some":"data"}`, traceBody(map[string]string{"some": "data"}))
 	require.Equal(t, `(binary reader)`, traceBody(strings.NewReader("data to stream")))
+}
+
+func TestNewWithConfigResolverWired(t *testing.T) {
+	// A programmatic resolver (e.g. built from the dns config subsection by ffdns) is
+	// attached to the transport's dialer rather than forcing the all-or-nothing custom client.
+	ctx := context.Background()
+	c := NewWithConfig(ctx, Config{HTTPConfig: HTTPConfig{
+		Resolver: &net.Resolver{PreferGo: true},
+	}})
+	require.NotNil(t, c)
+	transport, ok := c.GetClient().Transport.(*http.Transport)
+	require.True(t, ok)
+	assert.NotNil(t, transport.DialContext)
+}
+
+func TestDialControlBlocksLoopbackWhenConfigured(t *testing.T) {
+	// With an SSRF denylist configured, the client blocks loopback before connecting
+	resetConf()
+	ssrfDenylist := []string{
+		"127.0.0.0/8",
+	}
+	utConf.SubSection("net").Set(ffnet.NetCIDRDenylist, ssrfDenylist)
+	utConf.Set(HTTPConfigURL, "http://127.0.0.1:1")
+	c, err := New(context.Background(), utConf)
+	require.NoError(t, err)
+	_, err = c.R().Get("/")
+	assert.Regexp(t, "FF00261", err)
+}
+
+func TestGenerateConfigDNSResolver(t *testing.T) {
+	// With dns.servers configured, GenerateConfig populates a resolver via ffdns
+	resetConf()
+	utConf.SubSection("dns").Set(ffdns.DNSServers, []string{"8.8.8.8"})
+	cfg, err := GenerateConfig(context.Background(), utConf)
+	assert.NoError(t, err)
+	assert.NotNil(t, cfg.Resolver)
+
+	// With no dns.servers, no resolver is built and Go's default selection stays in place
+	resetConf()
+	cfg, err = GenerateConfig(context.Background(), utConf)
+	assert.NoError(t, err)
+	assert.Nil(t, cfg.Resolver)
 }

@@ -20,9 +20,9 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/hyperledger/firefly-common/pkg/auth"
-	"github.com/hyperledger/firefly-common/pkg/auth/authfactory"
-	"github.com/hyperledger/firefly-common/pkg/config"
+	"github.com/hyperledger-firefly/common/pkg/auth"
+	"github.com/hyperledger-firefly/common/pkg/auth/authfactory"
+	"github.com/hyperledger-firefly/common/pkg/config"
 )
 
 func wrapAuthIfEnabled(ctx context.Context, conf config.Section, pluginName string, chain http.Handler) (http.Handler, error) {

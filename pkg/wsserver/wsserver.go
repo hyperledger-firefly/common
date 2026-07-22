@@ -22,8 +22,8 @@ import (
 	"sync"
 
 	"github.com/gorilla/websocket"
-	"github.com/hyperledger/firefly-common/pkg/i18n"
-	"github.com/hyperledger/firefly-common/pkg/log"
+	"github.com/hyperledger-firefly/common/pkg/i18n"
+	"github.com/hyperledger-firefly/common/pkg/log"
 )
 
 // The Protocol interface layers a protocol on top of raw websockets, that allows the server side to:
@@ -127,7 +127,13 @@ func (s *webSocketServer) connectionClosed(c *webSocketConnection) {
 }
 
 func (s *webSocketServer) Close() {
+	s.mux.Lock()
+	conns := make([]*webSocketConnection, 0, len(s.connections))
 	for _, c := range s.connections {
+		conns = append(conns, c)
+	}
+	s.mux.Unlock()
+	for _, c := range conns {
 		c.close()
 	}
 }

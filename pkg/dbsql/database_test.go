@@ -24,8 +24,8 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	sq "github.com/Masterminds/squirrel"
-	"github.com/hyperledger/firefly-common/pkg/ffapi"
-	"github.com/hyperledger/firefly-common/pkg/metric"
+	"github.com/hyperledger-firefly/common/pkg/ffapi"
+	"github.com/hyperledger-firefly/common/pkg/metric"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -85,6 +85,15 @@ func TestInitDatabaseGetDatabaseNameFailed(t *testing.T) {
 	mp.GetDatabaseNameError = fmt.Errorf("pop")
 	err := mp.Database.Init(context.Background(), mp, mp.config)
 	assert.Regexp(t, "FF00173.*pop", err)
+}
+
+func TestInitDatabaseMaxPlaceholdersProviderDefault(t *testing.T) {
+	mp := NewMockProvider()
+	mp.MaxPlaceholders = 65535
+	mp.Database.InitConfig(mp, mp.config)
+	err := mp.Database.Init(context.Background(), mp, mp.config)
+	assert.NoError(t, err)
+	assert.Equal(t, 65535, mp.Database.Features().MaxPlaceholders)
 }
 
 func TestInitDatabaseOpenFailed(t *testing.T) {

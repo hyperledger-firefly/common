@@ -21,8 +21,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/hyperledger/firefly-common/pkg/i18n"
-	"github.com/hyperledger/firefly-common/pkg/log"
+	"github.com/hyperledger-firefly/common/pkg/i18n"
+	"github.com/hyperledger-firefly/common/pkg/log"
 	"github.com/prometheus/client_golang/prometheus"
 )
 

@@ -31,9 +31,9 @@ import (
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3gen"
-	"github.com/hyperledger/firefly-common/pkg/config"
-	"github.com/hyperledger/firefly-common/pkg/fftypes"
-	"github.com/hyperledger/firefly-common/pkg/i18n"
+	"github.com/hyperledger-firefly/common/pkg/config"
+	"github.com/hyperledger-firefly/common/pkg/fftypes"
+	"github.com/hyperledger-firefly/common/pkg/i18n"
 )
 
 type SwaggerGenOptions struct {
@@ -43,6 +43,8 @@ type SwaggerGenOptions struct {
 	Title       string
 	Version     string
 	Description string
+
+	OpenAPIVersion string
 
 	// descriptions for the route parameters are parsed from the ffstruct tags
 	// when set this flag to true, if a description is not found, the generator will panic
@@ -113,8 +115,13 @@ func (sg *SwaggerGen) Generate(ctx context.Context, routes []*Route) *openapi3.T
 		}
 	}
 
+	openAPIVersion := "3.0.2"
+	if sg.options.OpenAPIVersion != "" {
+		openAPIVersion = sg.options.OpenAPIVersion
+	}
+
 	doc := &openapi3.T{
-		OpenAPI: "3.0.2",
+		OpenAPI: openAPIVersion,
 		Servers: openapi3.Servers{
 			server,
 		},
@@ -223,7 +230,14 @@ type OpenAPITagHandler struct {
 
 func (th *OpenAPITagHandler) HandleFFTags(ctx context.Context, route *Route, name string, tag reflect.StructTag, schema *openapi3.Schema) error {
 	if ffEnum := tag.Get("ffenum"); ffEnum != "" {
-		schema.Enum = fftypes.FFEnumValues(ffEnum)
+		// For a container field (e.g. []FFEnum or map[string]FFEnum) the openapi3gen library
+		// invokes this customizer with the same field tag for both the container schema and its
+		// element schema (array items / map additionalProperties). FFEnum values are always
+		// strings, so the enum belongs only on the string leaf - applying it to the "array" or
+		// "object" container node too produces invalid OpenAPI that strict SDK generators reject.
+		if schema.Type.Is(openapi3.TypeString) {
+			schema.Enum = fftypes.FFEnumValues(ffEnum)
+		}
 	}
 	if ffExtensions := tag.Get("ffschemaext"); ffExtensions != "" {
 		if err := applyFFExtensionsTag(ctx, schema, ffExtensions); err != nil {

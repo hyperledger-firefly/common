@@ -25,7 +25,7 @@ import (
 	"hash"
 	"strings"
 
-	"github.com/hyperledger/firefly-common/pkg/i18n"
+	"github.com/hyperledger-firefly/common/pkg/i18n"
 )
 
 // Bytes32 is a holder of a hash, that can be used to correlate onchain data with off-chain data.

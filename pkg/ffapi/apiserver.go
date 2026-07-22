@@ -33,12 +33,12 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/gorilla/mux"
-	"github.com/hyperledger/firefly-common/pkg/config"
-	"github.com/hyperledger/firefly-common/pkg/fftls"
-	"github.com/hyperledger/firefly-common/pkg/httpserver"
-	"github.com/hyperledger/firefly-common/pkg/i18n"
-	"github.com/hyperledger/firefly-common/pkg/log"
-	"github.com/hyperledger/firefly-common/pkg/metric"
+	"github.com/hyperledger-firefly/common/pkg/config"
+	"github.com/hyperledger-firefly/common/pkg/fftls"
+	"github.com/hyperledger-firefly/common/pkg/httpserver"
+	"github.com/hyperledger-firefly/common/pkg/i18n"
+	"github.com/hyperledger-firefly/common/pkg/log"
+	"github.com/hyperledger-firefly/common/pkg/metric"
 	"github.com/sirupsen/logrus"
 )
 
@@ -54,6 +54,7 @@ type APIServer interface {
 	Started() <-chan struct{}
 	MuxRouter(ctx context.Context) (*mux.Router, error)
 	APIPublicURL() string // valid to call after server is successfully started
+	MonitoringPublicURL() string
 }
 
 type apiServer[T any] struct {

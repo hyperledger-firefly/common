@@ -47,7 +47,7 @@ func TestWrapError(t *testing.T) {
 	assert.Equal(t, 500, interface{}(err).(FFError).HTTPStatus())
 	assert.Equal(t, MsgConfigFailed, interface{}(err).(FFError).MessageKey())
 	stackString := interface{}(err).(FFError).StackTrace()
-	fmt.Printf(stackString)
+	fmt.Print(stackString)
 	assert.NotEmpty(t, stackString)
 }
 

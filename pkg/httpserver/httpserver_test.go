@@ -35,10 +35,10 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/hyperledger/firefly-common/mocks/httpservermocks"
-	"github.com/hyperledger/firefly-common/pkg/auth/basic"
-	"github.com/hyperledger/firefly-common/pkg/config"
-	"github.com/hyperledger/firefly-common/pkg/fftls"
+	"github.com/hyperledger-firefly/common/mocks/httpservermocks"
+	"github.com/hyperledger-firefly/common/pkg/auth/basic"
+	"github.com/hyperledger-firefly/common/pkg/config"
+	"github.com/hyperledger-firefly/common/pkg/fftls"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )

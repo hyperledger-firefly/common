@@ -5,9 +5,9 @@ package authmocks
 import (
 	context "context"
 
-	config "github.com/hyperledger/firefly-common/pkg/config"
+	config "github.com/hyperledger-firefly/common/pkg/config"
 
-	fftypes "github.com/hyperledger/firefly-common/pkg/fftypes"
+	fftypes "github.com/hyperledger-firefly/common/pkg/fftypes"
 
 	mock "github.com/stretchr/testify/mock"
 )

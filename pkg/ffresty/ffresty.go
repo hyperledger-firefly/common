@@ -1,4 +1,4 @@
-// Copyright © 2025 Kaleido, Inc.
+// Copyright © 2026 Kaleido, Inc.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -28,15 +28,16 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/go-resty/resty/v2"
-	"github.com/hyperledger/firefly-common/pkg/config"
-	"github.com/hyperledger/firefly-common/pkg/ffapi"
-	"github.com/hyperledger/firefly-common/pkg/fftypes"
-	"github.com/hyperledger/firefly-common/pkg/i18n"
-	"github.com/hyperledger/firefly-common/pkg/log"
-	"github.com/hyperledger/firefly-common/pkg/metric"
+	"github.com/hyperledger-firefly/common/pkg/config"
+	"github.com/hyperledger-firefly/common/pkg/ffapi"
+	"github.com/hyperledger-firefly/common/pkg/fftypes"
+	"github.com/hyperledger-firefly/common/pkg/i18n"
+	"github.com/hyperledger-firefly/common/pkg/log"
+	"github.com/hyperledger-firefly/common/pkg/metric"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
 )
@@ -70,31 +71,33 @@ var (
 // HTTPConfig is all the optional configuration separate to the URL you wish to invoke.
 // This is JSON serializable with docs, so you can embed it into API objects.
 type HTTPConfig struct {
-	ProxyURL                      string                                    `ffstruct:"RESTConfig" json:"proxyURL,omitempty"`
-	HTTPRequestTimeout            fftypes.FFDuration                        `ffstruct:"RESTConfig" json:"requestTimeout,omitempty"`
-	HTTPIdleConnTimeout           fftypes.FFDuration                        `ffstruct:"RESTConfig" json:"idleTimeout,omitempty"`
-	HTTPMaxIdleTimeout            fftypes.FFDuration                        `ffstruct:"RESTConfig" json:"maxIdleTimeout,omitempty"`
-	HTTPConnectionTimeout         fftypes.FFDuration                        `ffstruct:"RESTConfig" json:"connectionTimeout,omitempty"`
-	HTTPExpectContinueTimeout     fftypes.FFDuration                        `ffstruct:"RESTConfig" json:"expectContinueTimeout,omitempty"`
-	AuthUsername                  string                                    `ffstruct:"RESTConfig" json:"authUsername,omitempty"`
-	AuthPassword                  string                                    `ffstruct:"RESTConfig" json:"authPassword,omitempty"`
-	ThrottleRequestsPerSecond     int                                       `ffstruct:"RESTConfig" json:"requestsPerSecond,omitempty"`
-	ThrottleBurst                 int                                       `ffstruct:"RESTConfig" json:"burst,omitempty"`
-	Retry                         bool                                      `ffstruct:"RESTConfig" json:"retry,omitempty"`
-	RetryCount                    int                                       `ffstruct:"RESTConfig" json:"retryCount,omitempty"`
-	RetryInitialDelay             fftypes.FFDuration                        `ffstruct:"RESTConfig" json:"retryInitialDelay,omitempty"`
-	RetryMaximumDelay             fftypes.FFDuration                        `ffstruct:"RESTConfig" json:"retryMaximumDelay,omitempty"`
-	RetryErrorStatusCodeRegex     string                                    `ffstruct:"RESTConfig" json:"retryErrorStatusCodeRegex,omitempty"`
-	HTTPMaxIdleConns              int                                       `ffstruct:"RESTConfig" json:"maxIdleConns,omitempty"`
-	HTTPMaxConnsPerHost           int                                       `ffstruct:"RESTConfig" json:"maxConnsPerHost,omitempty"`
-	HTTPMaxIdleConnsPerHost       int                                       `ffstruct:"RESTConfig" json:"maxIdleConnsPerHost,omitempty"`
-	HTTPPassthroughHeadersEnabled bool                                      `ffstruct:"RESTConfig" json:"httpPassthroughHeadersEnabled,omitempty"`
-	HTTPHeaders                   fftypes.JSONObject                        `ffstruct:"RESTConfig" json:"headers,omitempty"`
-	HTTPTLSHandshakeTimeout       fftypes.FFDuration                        `ffstruct:"RESTConfig" json:"tlsHandshakeTimeout,omitempty"`
-	HTTPCustomClient              interface{}                               `json:"-"`
-	TLSClientConfig               *tls.Config                               `json:"-"` // should be built from separate TLSConfig using fftls utils
-	OnCheckRetry                  func(res *resty.Response, err error) bool `json:"-"` // response could be nil on err
-	OnBeforeRequest               func(req *resty.Request) error            `json:"-"` // called before each request, even retry
+	ProxyURL                      string                                                 `ffstruct:"RESTConfig" json:"proxyURL,omitempty"`
+	HTTPRequestTimeout            fftypes.FFDuration                                     `ffstruct:"RESTConfig" json:"requestTimeout,omitempty"`
+	HTTPIdleConnTimeout           fftypes.FFDuration                                     `ffstruct:"RESTConfig" json:"idleTimeout,omitempty"`
+	HTTPMaxIdleTimeout            fftypes.FFDuration                                     `ffstruct:"RESTConfig" json:"maxIdleTimeout,omitempty"`
+	HTTPConnectionTimeout         fftypes.FFDuration                                     `ffstruct:"RESTConfig" json:"connectionTimeout,omitempty"`
+	HTTPExpectContinueTimeout     fftypes.FFDuration                                     `ffstruct:"RESTConfig" json:"expectContinueTimeout,omitempty"`
+	AuthUsername                  string                                                 `ffstruct:"RESTConfig" json:"authUsername,omitempty"`
+	AuthPassword                  string                                                 `ffstruct:"RESTConfig" json:"authPassword,omitempty"`
+	ThrottleRequestsPerSecond     int                                                    `ffstruct:"RESTConfig" json:"requestsPerSecond,omitempty"`
+	ThrottleBurst                 int                                                    `ffstruct:"RESTConfig" json:"burst,omitempty"`
+	Retry                         bool                                                   `ffstruct:"RESTConfig" json:"retry,omitempty"`
+	RetryCount                    int                                                    `ffstruct:"RESTConfig" json:"retryCount,omitempty"`
+	RetryInitialDelay             fftypes.FFDuration                                     `ffstruct:"RESTConfig" json:"retryInitialDelay,omitempty"`
+	RetryMaximumDelay             fftypes.FFDuration                                     `ffstruct:"RESTConfig" json:"retryMaximumDelay,omitempty"`
+	RetryErrorStatusCodeRegex     string                                                 `ffstruct:"RESTConfig" json:"retryErrorStatusCodeRegex,omitempty"`
+	HTTPMaxIdleConns              int                                                    `ffstruct:"RESTConfig" json:"maxIdleConns,omitempty"`
+	HTTPMaxConnsPerHost           int                                                    `ffstruct:"RESTConfig" json:"maxConnsPerHost,omitempty"`
+	HTTPMaxIdleConnsPerHost       int                                                    `ffstruct:"RESTConfig" json:"maxIdleConnsPerHost,omitempty"`
+	HTTPPassthroughHeadersEnabled bool                                                   `ffstruct:"RESTConfig" json:"httpPassthroughHeadersEnabled,omitempty"`
+	HTTPHeaders                   fftypes.JSONObject                                     `ffstruct:"RESTConfig" json:"headers,omitempty"`
+	HTTPTLSHandshakeTimeout       fftypes.FFDuration                                     `ffstruct:"RESTConfig" json:"tlsHandshakeTimeout,omitempty"`
+	HTTPCustomClient              interface{}                                            `json:"-"`
+	TLSClientConfig               *tls.Config                                            `json:"-"` // should be built from separate TLSConfig using fftls utils
+	Resolver                      *net.Resolver                                          `json:"-"` // programmatic DNS resolver override; takes precedence over DNSServers
+	DialControl                   func(network, address string, c syscall.RawConn) error `json:"-"` // SSRF CIDR-denylist guard applied to the dialer; built from the dns config via ffdns
+	OnCheckRetry                  func(res *resty.Response, err error) bool              `json:"-"` // response could be nil on err
+	OnBeforeRequest               func(req *resty.Request) error                         `json:"-"` // called before each request, even retry
 }
 
 func EnableClientMetrics(ctx context.Context, metricsRegistry metric.MetricsRegistry) error {
@@ -212,12 +215,23 @@ func NewWithConfig(ctx context.Context, ffrestyConfig Config) (client *resty.Cli
 
 	if client == nil {
 
+		dialer := &net.Dialer{
+			Timeout:   time.Duration(ffrestyConfig.HTTPConnectionTimeout),
+			KeepAlive: time.Duration(ffrestyConfig.HTTPConnectionTimeout),
+		}
+		// An explicit programmatic resolver wins; otherwise build one from any configured DNS servers.
+		// Either way the system resolver is replaced with Go's built-in resolver.
+		if ffrestyConfig.Resolver != nil {
+			dialer.Resolver = ffrestyConfig.Resolver
+		}
+		// CIDR-denylist guard for SSRF and/or high-trust, checked against the resolved IP just before connect.
+		if ffrestyConfig.DialControl != nil {
+			dialer.Control = ffrestyConfig.DialControl
+		}
+
 		httpTransport := &http.Transport{
-			Proxy: http.ProxyFromEnvironment,
-			DialContext: (&net.Dialer{
-				Timeout:   time.Duration(ffrestyConfig.HTTPConnectionTimeout),
-				KeepAlive: time.Duration(ffrestyConfig.HTTPConnectionTimeout),
-			}).DialContext,
+			Proxy:                 http.ProxyFromEnvironment,
+			DialContext:           dialer.DialContext,
 			ForceAttemptHTTP2:     true,
 			MaxIdleConns:          ffrestyConfig.HTTPMaxIdleConns,
 			MaxConnsPerHost:       ffrestyConfig.HTTPMaxConnsPerHost,

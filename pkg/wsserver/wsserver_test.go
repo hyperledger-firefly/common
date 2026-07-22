@@ -25,7 +25,7 @@ import (
 	"time"
 
 	ws "github.com/gorilla/websocket"
-	"github.com/hyperledger/firefly-common/pkg/config"
+	"github.com/hyperledger-firefly/common/pkg/config"
 	"github.com/sirupsen/logrus"
 
 	"github.com/stretchr/testify/assert"

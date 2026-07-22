@@ -1,4 +1,4 @@
-// Copyright © 2024 Kaleido, Inc.
+// Copyright © 2026 Kaleido, Inc.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -19,9 +19,11 @@ package ffresty
 import (
 	"context"
 
-	"github.com/hyperledger/firefly-common/pkg/config"
-	"github.com/hyperledger/firefly-common/pkg/fftls"
-	"github.com/hyperledger/firefly-common/pkg/fftypes"
+	"github.com/hyperledger-firefly/common/pkg/config"
+	"github.com/hyperledger-firefly/common/pkg/ffdns"
+	"github.com/hyperledger-firefly/common/pkg/ffnet"
+	"github.com/hyperledger-firefly/common/pkg/fftls"
+	"github.com/hyperledger-firefly/common/pkg/fftypes"
 )
 
 const (
@@ -120,6 +122,12 @@ func InitConfig(conf config.Section) {
 
 	tlsConfig := conf.SubSection("tls")
 	fftls.InitTLSConfig(tlsConfig)
+
+	dnsConfig := conf.SubSection("dns")
+	ffdns.InitConfig(dnsConfig)
+
+	netConfig := conf.SubSection("net")
+	ffnet.InitConfig(netConfig)
 }
 
 func GenerateConfig(ctx context.Context, conf config.Section) (*Config, error) {
@@ -156,6 +164,22 @@ func GenerateConfig(ctx context.Context, conf config.Section) (*Config, error) {
 	}
 
 	ffrestyConfig.TLSClientConfig = tlsClientConfig
+
+	dnsCfg, err := ffdns.GenerateConfig(conf.SubSection("dns"))
+	if err != nil {
+		return nil, err
+	}
+	ffrestyConfig.Resolver = ffdns.NewResolverWithConfig(dnsCfg)
+
+	netCfg, err := ffnet.GenerateConfig(conf.SubSection("net"))
+	if err != nil {
+		return nil, err
+	}
+	dialControl, err := ffnet.NewDialControl(ctx, netCfg)
+	if err != nil {
+		return nil, err
+	}
+	ffrestyConfig.DialControl = dialControl
 
 	return ffrestyConfig, nil
 }

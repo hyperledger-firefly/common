@@ -23,7 +23,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/hyperledger/firefly-common/pkg/i18n"
+	"github.com/hyperledger-firefly/common/pkg/i18n"
 )
 
 // FFStringArray is an array of strings, each conforming to the requirements of a FireFly name

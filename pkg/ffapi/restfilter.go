@@ -25,8 +25,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/hyperledger/firefly-common/pkg/i18n"
-	"github.com/hyperledger/firefly-common/pkg/log"
+	"github.com/hyperledger-firefly/common/pkg/i18n"
+	"github.com/hyperledger-firefly/common/pkg/log"
 )
 
 func (hs *HandlerFactory) getValues(values url.Values, key string) (results []string) {

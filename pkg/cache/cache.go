@@ -32,7 +32,7 @@ const (
 	//
 	// The default behavior is that items are returned until they have been purged from the cache by an
 	// synchronous reaper
-	// NOTE: see issue https://github.com/hyperledger/firefly-common/issues/85 on operation of the async reaper.
+	// NOTE: see issue https://github.com/hyperledger-firefly/common/issues/85 on operation of the async reaper.
 	StrictExpiry BehaviorOption = iota
 
 	// TTLFromInitialAdd sets the behavior so that the time-to-live for a cache entry is set when
@@ -124,7 +124,7 @@ func (c *CCache) GetString(key string) string {
 	if c.enabled {
 		val := c.Get(key)
 		if val != nil {
-			return c.Get(key).(string)
+			return val.(string)
 		}
 	}
 	return ""
@@ -140,7 +140,7 @@ func (c *CCache) GetInt(key string) int {
 	if c.enabled {
 		val := c.Get(key)
 		if val != nil {
-			return c.Get(key).(int)
+			return val.(int)
 		}
 	}
 	return 0
@@ -156,7 +156,7 @@ func (c *CCache) GetInt64(key string) int64 {
 	if c.enabled {
 		val := c.Get(key)
 		if val != nil {
-			return c.Get(key).(int64)
+			return val.(int64)
 		}
 	}
 	return 0

@@ -24,10 +24,10 @@ import (
 	"strings"
 
 	sq "github.com/Masterminds/squirrel"
-	"github.com/hyperledger/firefly-common/pkg/i18n"
+	"github.com/hyperledger-firefly/common/pkg/i18n"
 )
 
-// PostgreSQL helper to avoid implementing this lots of times in child packages
+// BuildPostgreSQLOptimizedUpsert is a PostgreSQL helper to avoid implementing this lots of times in child packages
 func BuildPostgreSQLOptimizedUpsert(ctx context.Context, table string, idColumn string, insertCols, updateCols []string, returnCol string, values map[string]driver.Value) (insert sq.InsertBuilder, err error) {
 	insertValues := make([]interface{}, 0, len(insertCols))
 	for _, c := range insertCols {
@@ -44,7 +44,6 @@ func BuildPostgreSQLOptimizedUpsert(ctx context.Context, table string, idColumn 
 		return insert, i18n.NewError(ctx, i18n.MsgDBErrorBuildingStatement, err)
 	}
 	return insert.Suffix(fmt.Sprintf("ON CONFLICT (%s) DO UPDATE", idColumn)).SuffixExpr(sq.Expr(updateSQL, updateValues...)).Suffix("RETURNING " + returnCol), nil
-
 }
 
 // GetPostgreSQLDatabaseName extracts the database name from a PostgreSQL connection URI
