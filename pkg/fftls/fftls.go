@@ -101,14 +101,18 @@ func NewTLSConfig(ctx context.Context, config *Config, tlsType TLSType) (*tls.Co
 	}
 
 	var err error
-	// Support custom CA file
+	// Support custom CA file. By default a configured CA replaces RootCAs. When IncludeSystemCAs
+	// is set, the custom CA is merged into the system pool (e.g. private CA + public CAs for
+	// HTTP clients that follow redirects to S3).
 	var rootCAs *x509.CertPool
 	switch {
 	case config.CAFile != "":
-		log.L(ctx).Tracef("Loading CA file at %s", config.CAFile)
-		rootCAs = x509.NewCertPool()
+		log.L(ctx).Tracef("Loading CA file at %s (includeSystemCAs=%t)", config.CAFile, config.IncludeSystemCAs)
+		rootCAs, err = newRootCAPool(ctx, config.IncludeSystemCAs)
 		var caBytes []byte
-		caBytes, err = os.ReadFile(config.CAFile)
+		if err == nil {
+			caBytes, err = os.ReadFile(config.CAFile)
+		}
 		if err == nil {
 			ok := rootCAs.AppendCertsFromPEM(caBytes)
 			if !ok {
@@ -119,13 +123,16 @@ func NewTLSConfig(ctx context.Context, config *Config, tlsType TLSType) (*tls.Co
 			}
 		}
 	case config.CA != "":
-		rootCAs = x509.NewCertPool()
-		ok := rootCAs.AppendCertsFromPEM([]byte(config.CA))
-		if !ok {
-			err = i18n.NewError(ctx, i18n.MsgInvalidCAFile)
-		} else {
-			// The CA bundle may contain multiple certificates - record an expiry gauge for each
-			recordCACertExpiryMetrics(ctx, []byte(config.CA))
+		log.L(ctx).Tracef("Loading inline CA PEM (includeSystemCAs=%t)", config.IncludeSystemCAs)
+		rootCAs, err = newRootCAPool(ctx, config.IncludeSystemCAs)
+		if err == nil {
+			ok := rootCAs.AppendCertsFromPEM([]byte(config.CA))
+			if !ok {
+				err = i18n.NewError(ctx, i18n.MsgInvalidCAFile)
+			} else {
+				// The CA bundle may contain multiple certificates - record an expiry gauge for each
+				recordCACertExpiryMetrics(ctx, []byte(config.CA))
+			}
 		}
 	default:
 		rootCAs, err = x509.SystemCertPool()
@@ -195,6 +202,19 @@ func NewTLSConfig(ctx context.Context, config *Config, tlsType TLSType) (*tls.Co
 
 	return tlsConfig, nil
 
+}
+
+// newRootCAPool returns an empty pool, or the system pool when includeSystemCAs is true.
+func newRootCAPool(ctx context.Context, includeSystemCAs bool) (*x509.CertPool, error) {
+	if !includeSystemCAs {
+		return x509.NewCertPool(), nil
+	}
+	rootCAs, err := x509.SystemCertPool()
+	if err != nil {
+		log.L(ctx).Warnf("Unable to load system cert pool; starting with empty pool: %s", err)
+		return x509.NewCertPool(), nil
+	}
+	return rootCAs, nil
 }
 
 // recordCACertExpiryMetrics decodes a PEM bundle (which may contain one or more certificates) and
