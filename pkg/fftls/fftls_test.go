@@ -25,13 +25,13 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"github.com/stretchr/testify/require"
+	"io"
 	"math/big"
 	"net"
 	"os"
 	"strings"
 	"testing"
 	"time"
-	"io"
 
 	"github.com/hyperledger-firefly/common/pkg/config"
 	"github.com/stretchr/testify/assert"
@@ -541,4 +541,141 @@ func TestConnectSkipVerification(t *testing.T) {
 	assert.Equal(t, []byte{42}, readBytes)
 	_ = conn.Close()
 
+}
+
+func TestIncludeSystemCAs_NilIfNotEnabled(t *testing.T) {
+	config.RootConfigReset()
+	conf := config.RootSection("fftls_client_merge")
+	InitTLSConfig(conf)
+
+	tlsConfig, err := ConstructTLSConfig(context.Background(), conf, ClientType)
+	assert.NoError(t, err)
+	assert.Nil(t, tlsConfig)
+}
+
+func TestIncludeSystemCAs_DefaultsWithoutCustomCA(t *testing.T) {
+	config.RootConfigReset()
+	conf := config.RootSection("fftls_client_merge")
+	InitTLSConfig(conf)
+	conf.Set(HTTPConfTLSEnabled, true)
+	conf.Set(HTTPConfTLSIncludeSystemCAs, true)
+
+	tlsConfig, err := ConstructTLSConfig(context.Background(), conf, ClientType)
+	assert.NoError(t, err)
+	require.NotNil(t, tlsConfig)
+	assert.False(t, tlsConfig.InsecureSkipVerify)
+	assert.Equal(t, uint16(tls.VersionTLS12), tlsConfig.MinVersion)
+	assert.Nil(t, tlsConfig.GetClientCertificate)
+
+	systemPool, err := x509.SystemCertPool()
+	if err == nil && systemPool != nil {
+		assert.True(t, tlsConfig.RootCAs.Equal(systemPool))
+	}
+}
+
+func TestIncludeSystemCAs_CAFileMergesSystemPool(t *testing.T) {
+	config.RootConfigReset()
+	caFile, _ := buildSelfSignedTLSKeyPairFiles(t, pkix.Name{CommonName: "test-ca.example.com"})
+
+	conf := config.RootSection("fftls_client_merge")
+	InitTLSConfig(conf)
+	conf.Set(HTTPConfTLSEnabled, true)
+	conf.Set(HTTPConfTLSCAFile, caFile)
+	conf.Set(HTTPConfTLSIncludeSystemCAs, true)
+
+	merged, err := ConstructTLSConfig(context.Background(), conf, ClientType)
+	assert.NoError(t, err)
+	require.NotNil(t, merged)
+	require.NotNil(t, merged.RootCAs)
+
+	conf.Set(HTTPConfTLSIncludeSystemCAs, false)
+	replaced, err := ConstructTLSConfig(context.Background(), conf, ClientType)
+	assert.NoError(t, err)
+	require.NotNil(t, replaced)
+	require.NotNil(t, replaced.RootCAs)
+
+	systemPool, sysErr := x509.SystemCertPool()
+	if sysErr != nil || systemPool == nil {
+		t.Skip("system cert pool unavailable")
+	}
+	expected := systemPool.Clone()
+	caBytes, err := os.ReadFile(caFile)
+	require.NoError(t, err)
+	require.True(t, expected.AppendCertsFromPEM(caBytes))
+
+	assert.True(t, merged.RootCAs.Equal(expected), "custom CA should be merged into the system pool")
+	assert.False(t, replaced.RootCAs.Equal(expected), "without includeSystemCAs, RootCAs should be only the custom CA")
+}
+
+func TestIncludeSystemCAs_InlineCAMergesSystemPool(t *testing.T) {
+	config.RootConfigReset()
+	caPEM, _ := buildSelfSignedTLSKeyPair(t, pkix.Name{CommonName: "inline-ca.example.com"})
+
+	conf := config.RootSection("fftls_client_merge")
+	InitTLSConfig(conf)
+	conf.Set(HTTPConfTLSEnabled, true)
+	conf.Set(HTTPConfTLSCA, caPEM)
+	conf.Set(HTTPConfTLSIncludeSystemCAs, true)
+
+	merged, err := ConstructTLSConfig(context.Background(), conf, ClientType)
+	assert.NoError(t, err)
+	require.NotNil(t, merged.RootCAs)
+
+	systemPool, sysErr := x509.SystemCertPool()
+	if sysErr != nil || systemPool == nil {
+		t.Skip("system cert pool unavailable")
+	}
+	expected := systemPool.Clone()
+	require.True(t, expected.AppendCertsFromPEM([]byte(caPEM)))
+	assert.True(t, merged.RootCAs.Equal(expected))
+}
+
+func TestIncludeSystemCAs_WithClientCert(t *testing.T) {
+	config.RootConfigReset()
+	certFile, keyFile := buildSelfSignedTLSKeyPairFiles(t, pkix.Name{CommonName: "client.example.com"})
+	caFile, _ := buildSelfSignedTLSKeyPairFiles(t, pkix.Name{CommonName: "ca.example.com"})
+
+	conf := config.RootSection("fftls_client_merge")
+	InitTLSConfig(conf)
+	conf.Set(HTTPConfTLSEnabled, true)
+	conf.Set(HTTPConfTLSCertFile, certFile)
+	conf.Set(HTTPConfTLSKeyFile, keyFile)
+	conf.Set(HTTPConfTLSCAFile, caFile)
+	conf.Set(HTTPConfTLSIncludeSystemCAs, true)
+	conf.Set(HTTPConfTLSInsecureSkipHostVerify, true)
+
+	tlsConfig, err := ConstructTLSConfig(context.Background(), conf, ClientType)
+	assert.NoError(t, err)
+	require.NotNil(t, tlsConfig)
+	assert.True(t, tlsConfig.InsecureSkipVerify)
+	require.NotNil(t, tlsConfig.GetClientCertificate)
+	cert, err := tlsConfig.GetClientCertificate(nil)
+	assert.NoError(t, err)
+	assert.NotNil(t, cert)
+}
+
+func TestIncludeSystemCAs_InvalidCAFile(t *testing.T) {
+	config.RootConfigReset()
+	_, notTheCAFileTheKey := buildSelfSignedTLSKeyPairFiles(t, pkix.Name{CommonName: "server.example.com"})
+
+	conf := config.RootSection("fftls_client_merge")
+	InitTLSConfig(conf)
+	conf.Set(HTTPConfTLSEnabled, true)
+	conf.Set(HTTPConfTLSCAFile, notTheCAFileTheKey)
+	conf.Set(HTTPConfTLSIncludeSystemCAs, true)
+
+	_, err := ConstructTLSConfig(context.Background(), conf, ClientType)
+	assert.Regexp(t, "FF00152", err)
+}
+
+func TestIncludeSystemCAs_CAFileNotFound(t *testing.T) {
+	config.RootConfigReset()
+	conf := config.RootSection("fftls_client_merge")
+	InitTLSConfig(conf)
+	conf.Set(HTTPConfTLSEnabled, true)
+	conf.Set(HTTPConfTLSCAFile, "/nonexistent/ca.pem")
+	conf.Set(HTTPConfTLSIncludeSystemCAs, true)
+
+	_, err := ConstructTLSConfig(context.Background(), conf, ClientType)
+	assert.Error(t, err)
 }

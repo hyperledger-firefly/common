@@ -44,7 +44,13 @@ const (
 	// HTTPConfTLSRequiredDNAttributes provides a set of regular expressions, to match against the DN of the client. Requires HTTPConfTLSClientAuth
 	HTTPConfTLSRequiredDNAttributes = "requiredDNAttributes"
 
-	defaultHTTPTLSEnabled = false
+	// HTTPConfTLSIncludeSystemCAs when true and a custom CA (caFile/ca) is configured, merges that CA
+	// into the system certificate pool instead of replacing RootCAs. Useful for outbound HTTP clients
+	// that talk to a private CA endpoint and may follow redirects to publicly trusted hosts (e.g. S3).
+	HTTPConfTLSIncludeSystemCAs = "includeSystemCAs"
+
+	defaultHTTPTLSEnabled          = false
+	defaultHTTPTLSIncludeSystemCAs = false
 )
 
 type Config struct {
@@ -57,6 +63,7 @@ type Config struct {
 	KeyFile                string                 `ffstruct:"tlsconfig" json:"keyFile,omitempty"`
 	Key                    string                 `ffstruct:"tlsconfig" json:"key,omitempty"`
 	InsecureSkipHostVerify bool                   `ffstruct:"tlsconfig" json:"insecureSkipHostVerify"`
+	IncludeSystemCAs       bool                   `ffstruct:"tlsconfig" json:"includeSystemCAs,omitempty"`
 	RequiredDNAttributes   map[string]interface{} `ffstruct:"tlsconfig" json:"requiredDNAttributes,omitempty"`
 }
 
@@ -71,6 +78,7 @@ func InitTLSConfig(conf config.Section) {
 	conf.AddKnownKey(HTTPConfTLSKey)
 	conf.AddKnownKey(HTTPConfTLSRequiredDNAttributes)
 	conf.AddKnownKey(HTTPConfTLSInsecureSkipHostVerify)
+	conf.AddKnownKey(HTTPConfTLSIncludeSystemCAs, defaultHTTPTLSIncludeSystemCAs)
 }
 
 func GenerateConfig(conf config.Section) *Config {
@@ -84,6 +92,7 @@ func GenerateConfig(conf config.Section) *Config {
 		KeyFile:                conf.GetString(HTTPConfTLSKeyFile),
 		Key:                    conf.GetString(HTTPConfTLSKey),
 		InsecureSkipHostVerify: conf.GetBool(HTTPConfTLSInsecureSkipHostVerify),
+		IncludeSystemCAs:       conf.GetBool(HTTPConfTLSIncludeSystemCAs),
 		RequiredDNAttributes:   conf.GetObject(HTTPConfTLSRequiredDNAttributes),
 	}
 }

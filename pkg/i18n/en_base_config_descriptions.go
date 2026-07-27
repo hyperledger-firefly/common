@@ -78,6 +78,7 @@ var (
 	ConfigGlobalTLSKeyFile                = ffc("config.global.tls.keyFile", "The path to the private key file for TLS on this API", StringType)
 	ConfigGlobalTLSRequiredDNAttributes   = ffc("config.global.tls.requiredDNAttributes", "A set of required subject DN attributes. Each entry is a regular expression, and the subject certificate must have a matching attribute of the specified type (CN, C, O, OU, ST, L, STREET, POSTALCODE, SERIALNUMBER are valid attributes)", MapStringStringType)
 	ConfigGlobalTLSInsecureSkipHostVerify = ffc("config.global.tls.insecureSkipHostVerify", "When to true in unit test development environments to disable TLS verification. Use with extreme caution", BooleanType)
+	ConfigGlobalTLSIncludeSystemCAs       = ffc("config.global.tls.includeSystemCAs", "When true and a custom CA (caFile/ca) is configured, merge that CA into the system certificate pool instead of replacing it. Useful for outbound HTTP clients that may follow redirects to publicly trusted hosts", BooleanType)
 	ConfigGlobalTLSHandshakeTimeout       = ffc("config.global.tlsHandshakeTimeout", "The maximum amount of time to wait for a successful TLS handshake", TimeDurationType)
 
 	ConfigGlobalBodyTemplate              = ffc("config.global.bodyTemplate", "The body go template string to use when making HTTP requests", GoTemplateType)
