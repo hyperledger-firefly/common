@@ -108,11 +108,9 @@ func NewTLSConfig(ctx context.Context, config *Config, tlsType TLSType) (*tls.Co
 	switch {
 	case config.CAFile != "":
 		log.L(ctx).Tracef("Loading CA file at %s (includeSystemCAs=%t)", config.CAFile, config.IncludeSystemCAs)
-		rootCAs, err = newRootCAPool(ctx, config.IncludeSystemCAs)
+		rootCAs = newRootCAPool(ctx, config.IncludeSystemCAs)
 		var caBytes []byte
-		if err == nil {
-			caBytes, err = os.ReadFile(config.CAFile)
-		}
+		caBytes, err = os.ReadFile(config.CAFile)
 		if err == nil {
 			ok := rootCAs.AppendCertsFromPEM(caBytes)
 			if !ok {
@@ -124,15 +122,13 @@ func NewTLSConfig(ctx context.Context, config *Config, tlsType TLSType) (*tls.Co
 		}
 	case config.CA != "":
 		log.L(ctx).Tracef("Loading inline CA PEM (includeSystemCAs=%t)", config.IncludeSystemCAs)
-		rootCAs, err = newRootCAPool(ctx, config.IncludeSystemCAs)
-		if err == nil {
-			ok := rootCAs.AppendCertsFromPEM([]byte(config.CA))
-			if !ok {
-				err = i18n.NewError(ctx, i18n.MsgInvalidCAFile)
-			} else {
-				// The CA bundle may contain multiple certificates - record an expiry gauge for each
-				recordCACertExpiryMetrics(ctx, []byte(config.CA))
-			}
+		rootCAs = newRootCAPool(ctx, config.IncludeSystemCAs)
+		ok := rootCAs.AppendCertsFromPEM([]byte(config.CA))
+		if !ok {
+			err = i18n.NewError(ctx, i18n.MsgInvalidCAFile)
+		} else {
+			// The CA bundle may contain multiple certificates - record an expiry gauge for each
+			recordCACertExpiryMetrics(ctx, []byte(config.CA))
 		}
 	default:
 		rootCAs, err = x509.SystemCertPool()
@@ -205,16 +201,16 @@ func NewTLSConfig(ctx context.Context, config *Config, tlsType TLSType) (*tls.Co
 }
 
 // newRootCAPool returns an empty pool, or the system pool when includeSystemCAs is true.
-func newRootCAPool(ctx context.Context, includeSystemCAs bool) (*x509.CertPool, error) {
+func newRootCAPool(ctx context.Context, includeSystemCAs bool) *x509.CertPool {
 	if !includeSystemCAs {
-		return x509.NewCertPool(), nil
+		return x509.NewCertPool()
 	}
 	rootCAs, err := x509.SystemCertPool()
 	if err != nil {
 		log.L(ctx).Warnf("Unable to load system cert pool; starting with empty pool: %s", err)
-		return x509.NewCertPool(), nil
+		return x509.NewCertPool()
 	}
-	return rootCAs, nil
+	return rootCAs
 }
 
 // recordCACertExpiryMetrics decodes a PEM bundle (which may contain one or more certificates) and
