@@ -352,6 +352,29 @@ func TestAPIServerSwaggerJSON(t *testing.T) {
 	assert.Regexp(t, "application/json", res.Header().Get("content-type"))
 }
 
+func TestAPIServerSwaggerFilterLimitsFromConfig(t *testing.T) {
+	_, as, done := newTestAPIServer(t, false)
+	defer done()
+
+	assert.Equal(t, "25", as.baseSwaggerGenOptions.APIDefaultFilterLimit)
+	assert.Equal(t, uint(100), as.baseSwaggerGenOptions.APIMaxFilterLimit)
+	assert.Equal(t, uint(100000), as.baseSwaggerGenOptions.APIMaxFilterSkip)
+
+	doc := NewSwaggerGen(&as.baseSwaggerGenOptions).Generate(context.Background(), []*Route{{
+		Name:            "getThings",
+		Path:            "things",
+		Method:          http.MethodGet,
+		Description:     "list things",
+		FilterFactory:   TestQueryFactory,
+		JSONOutputValue: func() interface{} { return &sampleOutput{} },
+		JSONOutputCodes: []int{http.StatusOK},
+	}})
+	b, err := json.Marshal(doc)
+	assert.NoError(t, err)
+	assert.Contains(t, string(b), "The maximum number of records to return (max: 100)")
+	assert.Contains(t, string(b), "The number of records to skip (max: 100,000)")
+}
+
 func TestAPIServerSwaggerYAML(t *testing.T) {
 	_, as, done := newTestAPIServer(t, true)
 	defer done()
