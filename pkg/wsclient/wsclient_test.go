@@ -26,6 +26,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path"
+	"sync"
 	"testing"
 	"time"
 
@@ -274,6 +275,97 @@ func TestWSNeverConnectBG(t *testing.T) {
 	assert.NoError(t, err)
 
 	wsc.Close()
+}
+
+func TestWSBackgroundConnectCancelRace(t *testing.T) {
+	// Connect() publishes the background connect state that Close() tears down, and Close()
+	// is driven concurrently by cancellation of the context passed to New()
+	closedSvr := httptest.NewServer(&http.ServeMux{})
+	closedSvr.Close()
+
+	for i := 0; i < 100; i++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		wsc, err := New(ctx, &WSConfig{
+			HTTPURL:           closedSvr.URL,
+			BackgroundConnect: true,
+			InitialDelay:      1 * time.Millisecond,
+			MaximumDelay:      5 * time.Millisecond,
+		}, nil, nil)
+		require.NoError(t, err)
+
+		wg := new(sync.WaitGroup)
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			assert.NoError(t, wsc.Connect())
+		}()
+		go func() {
+			defer wg.Done()
+			cancel()
+		}()
+		wg.Wait()
+
+		// Must be safe, whether or not the context driven close got there first
+		wsc.Close()
+		cancel()
+	}
+}
+
+func TestWSConcurrentClose(t *testing.T) {
+	closedSvr := httptest.NewServer(&http.ServeMux{})
+	closedSvr.Close()
+
+	wsc, err := New(context.Background(), &WSConfig{
+		HTTPURL:           closedSvr.URL,
+		BackgroundConnect: true,
+		InitialDelay:      1 * time.Millisecond,
+		MaximumDelay:      5 * time.Millisecond,
+	}, nil, nil)
+	require.NoError(t, err)
+	require.NoError(t, wsc.Connect())
+
+	wg := new(sync.WaitGroup)
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			wsc.Close()
+		}()
+	}
+	wg.Wait()
+}
+
+func TestWSClosedWhileConnecting(t *testing.T) {
+	// Note this test does not use NewTestWSServer, as it needs no interaction with the
+	// server, and that server's connection tracking is not race detector safe
+	upgrader := &websocket.Upgrader{}
+	svr := httptest.NewServer(http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
+		conn, err := upgrader.Upgrade(res, req, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}))
+	defer svr.Close()
+
+	wsConfig := generateConfig()
+	wsConfig.HTTPURL = svr.URL
+
+	var wsc WSClient
+	wsc, err := New(context.Background(), wsConfig, func(ctx context.Context, w WSClient) error {
+		// Close the client underneath ourselves, so the connection we establish is orphaned
+		wsc.Close()
+		return nil
+	}, nil)
+	require.NoError(t, err)
+
+	err = wsc.Connect()
+	assert.Regexp(t, "FF00147", err)
 }
 
 func TestWSClientBadWSURL(t *testing.T) {

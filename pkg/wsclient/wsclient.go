@@ -128,6 +128,7 @@ type wsClient struct {
 	afterConnect         WSPostConnectHandler
 	disableReconnect     bool
 	heartbeatInterval    time.Duration
+	stateMux             sync.Mutex // guards closed, wsconn, bgConnDone and bgConnCancelCtx
 	heartbeatMux         sync.Mutex
 	activePingSent       *time.Time
 	lastPingCompleted    time.Time
@@ -242,21 +243,35 @@ func (w *wsClient) setupReceiveChannel() {
 
 func (w *wsClient) Connect() error {
 
-	if w.backgroundConnect && w.bgConnDone == nil {
-		w.bgConnDone = make(chan struct{})
-		w.ctx, w.bgConnCancelCtx = context.WithCancel(w.ctx)
-		go func() {
-			defer close(w.bgConnDone)
-			err := w.initialConnect()
-			if err != nil {
-				// Retry means we only reach here if context closes
-				log.L(w.ctx).Errorf("Connection to WebSocket %s was never established before shutdown: %s", w.url, err)
-			}
-		}()
+	// Initiate background connection option if configured (locks state on the stateMux)
+	if w.startBackgroundConnect() {
 		return nil
 	}
 
+	// Otherwise the initial connection occurs in the foreground
 	return w.initialConnect()
+}
+
+func (w *wsClient) startBackgroundConnect() bool {
+	w.stateMux.Lock()
+	defer w.stateMux.Unlock()
+
+	if !w.backgroundConnect || w.bgConnDone != nil {
+		return false // foreground initial connection mode
+	}
+
+	bgConnDone := make(chan struct{}) // local var to use in go routine
+	w.bgConnDone = bgConnDone
+	w.ctx, w.bgConnCancelCtx = context.WithCancel(w.ctx)
+	go func() {
+		defer close(bgConnDone)
+		err := w.initialConnect()
+		if err != nil {
+			// Retry means we only reach here if the context closes before initial connection
+			log.L(w.ctx).Errorf("Connection to WebSocket %s was never established before shutdown: %s", w.url, err)
+		}
+	}()
+	return true
 }
 
 func (w *wsClient) initialConnect() error {
@@ -268,20 +283,64 @@ func (w *wsClient) initialConnect() error {
 }
 
 func (w *wsClient) Close() {
-	if !w.closed {
-		w.closed = true
-		close(w.closing)
-		c := w.wsconn
-		if c != nil {
-			_ = c.Close()
-		}
-		bgc := w.bgConnDone
-		if bgc != nil {
-			w.bgConnCancelCtx()
-			<-w.bgConnDone
-			w.bgConnDone = nil
-		}
+	c, bgConnDone, bgConnCancelCtx, alreadyClosed := w.markClosed()
+	if alreadyClosed {
+		return
 	}
+	if c != nil {
+		_ = c.Close()
+	}
+	if bgConnDone != nil {
+		// Cancel the background connect routine and wait for it to exit. Note we must not
+		// be holding stateMux while we wait, as that routine takes it via isClosed()
+		bgConnCancelCtx()
+		<-bgConnDone
+	}
+}
+
+// markClosed transitions the client to closed exactly once, returning the resources the
+// caller must then clean up outside of the lock.
+func (w *wsClient) markClosed() (c *websocket.Conn, bgConnDone chan struct{}, bgConnCancelCtx context.CancelFunc, alreadyClosed bool) {
+	w.stateMux.Lock()
+	defer w.stateMux.Unlock()
+
+	if w.closed {
+		return nil, nil, nil, true
+	}
+	w.closed = true
+	close(w.closing)
+
+	// bgConnCancelCtx+bgConnDone are both set as a pair in the stateMux, so if one is non-nil they both are
+	c, bgConnDone, bgConnCancelCtx = w.wsconn, w.bgConnDone, w.bgConnCancelCtx
+	w.bgConnDone = nil
+	return c, bgConnDone, bgConnCancelCtx, false
+}
+
+// checks the closed var under the stateMux
+func (w *wsClient) isClosed() bool {
+	w.stateMux.Lock()
+	defer w.stateMux.Unlock()
+	return w.closed
+}
+
+// called when we've just connected a new underlying websocket.Conn, returning false
+// if the wsClient was cleaned up in the meantime - meaning the caller has an orphaned
+// connection they need to close.
+func (w *wsClient) setWSConnIfNotClosed(conn *websocket.Conn) bool {
+	w.stateMux.Lock()
+	defer w.stateMux.Unlock()
+	if w.closed {
+		return false
+	}
+	w.wsconn = conn
+	return true
+}
+
+func (w *wsClient) clearWSConn() {
+	w.stateMux.Lock()
+	defer w.stateMux.Unlock()
+
+	w.wsconn = nil
 }
 
 func (w *wsClient) Receive() <-chan []byte {
@@ -377,7 +436,7 @@ func (w *wsClient) connect(initial bool) error {
 	l := log.L(w.ctx)
 	l.Debugf("WS %s connecting, isInitial: %t", w.url, initial)
 	return w.connRetry.DoCustomLog(w.ctx, func(attempt int) (retry bool, err error) {
-		if w.closed {
+		if w.isClosed() {
 			l.Errorf("WS %s is closed, no retry will be attempted", w.url)
 			return false, i18n.NewError(w.ctx, i18n.MsgWSClosing)
 		}
@@ -391,7 +450,8 @@ func (w *wsClient) connect(initial bool) error {
 		}
 
 		var res *http.Response
-		w.wsconn, res, err = w.wsdialer.DialContext(w.ctx, w.url, w.headers)
+		var conn *websocket.Conn
+		conn, res, err = w.wsdialer.DialContext(w.ctx, w.url, w.headers)
 		if err != nil {
 			errMsg := err.Error()
 			var status = -1
@@ -407,9 +467,13 @@ func (w *wsClient) connect(initial bool) error {
 			l.Warnf("WS %s connect attempt %d failed [%d]: %s", w.url, attempt, status, errMsg)
 			return retry, i18n.WrapError(w.ctx, err, i18n.MsgWSConnectFailed)
 		}
+		if !w.setWSConnIfNotClosed(conn) {
+			_ = conn.Close() // we have to clean up the orphan we just created
+			return false, i18n.NewError(w.ctx, i18n.MsgWSClosing)
+		}
 		l.Debugf("WS %s connect attempt %d succeeded", w.url, attempt)
 		w.pongReceivedOrReset(false)
-		w.wsconn.SetPongHandler(w.pongHandler)
+		conn.SetPongHandler(w.pongHandler)
 		l.Infof("WS %s connected", w.url)
 		return false, nil
 	})
@@ -548,7 +612,7 @@ func (w *wsClient) receiveReconnectLoop() {
 	} else {
 		defer close(w.receive)
 	}
-	for !w.closed {
+	for !w.isClosed() {
 		// Start the sender, letting it close without blocking sending a notification on the sendDone
 		w.sendDone = make(chan []byte, 1)
 		receiverDone := make(chan struct{})
@@ -578,7 +642,7 @@ func (w *wsClient) receiveReconnectLoop() {
 			}
 			l.Debugf("WS %s reset the connection", w.url)
 			w.sendDone = nil
-			w.wsconn = nil
+			w.clearWSConn()
 		}
 
 		if w.disableReconnect {
@@ -587,7 +651,7 @@ func (w *wsClient) receiveReconnectLoop() {
 		}
 
 		// Go into reconnect
-		if !w.closed {
+		if !w.isClosed() {
 			err = w.connect(false)
 			if err != nil {
 				l.Errorf("WS %s exiting due to connect error: %v", w.url, err)
