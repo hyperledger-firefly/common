@@ -373,3 +373,63 @@ func TestValueFilterAccess(t *testing.T) {
 	assert.Equal(t, "seq", fb.ValueFilter().Field())
 	assert.Equal(t, 12345, fb.ValueFilter().Value())
 }
+
+// caseTestFactory declares camelCase fields, which resolve only if lookups fold case.
+var caseTestFactory = &QueryFields{
+	"id":            &Int64Field{},
+	"parentAccount": &StringField{},
+	"effectiveTime": &TimeField{},
+}
+
+func TestFilterFieldAnyCase(t *testing.T) {
+	for _, spelling := range []string{"parentAccount", "parentaccount", "PARENTACCOUNT"} {
+		fb := caseTestFactory.NewFilter(context.Background())
+		fi, err := fb.Eq(spelling, "urn:kld:account=abc").Finalize()
+		assert.NoError(t, err)
+		assert.Equal(t, "parentAccount", fi.Field, "Eq %q", spelling)
+
+		fb = caseTestFactory.NewFilter(context.Background())
+		fi, err = fb.In(spelling, []driver.Value{"a", "b"}).Finalize()
+		assert.NoError(t, err)
+		assert.Equal(t, "parentAccount", fi.Field, "In %q", spelling)
+	}
+}
+
+func TestFilterFieldAnyCaseUnknown(t *testing.T) {
+	fb := caseTestFactory.NewFilter(context.Background())
+	_, err := fb.Eq("NoSuchField", "value").Finalize()
+	assert.Regexp(t, "FF00142.*NoSuchField", err)
+
+	fb = caseTestFactory.NewFilter(context.Background())
+	_, err = fb.In("NoSuchField", []driver.Value{"a"}).Finalize()
+	assert.Regexp(t, "FF00142.*NoSuchField", err)
+}
+
+func TestSortGroupByAnyCase(t *testing.T) {
+	fb := caseTestFactory.NewFilter(context.Background())
+	fi, err := fb.Eq("id", 1).
+		Sort("-effectivetime", "PARENTACCOUNT").
+		GroupBy("parentaccount").
+		RequiredFields("EFFECTIVETIME").
+		Finalize()
+	assert.NoError(t, err)
+	assert.Equal(t, "effectiveTime", fi.Sort[0].Field)
+	assert.True(t, fi.Sort[0].Descending)
+	assert.Equal(t, "parentAccount", fi.Sort[1].Field)
+	assert.False(t, fi.Sort[1].Descending)
+	assert.Equal(t, []string{"parentAccount"}, fi.GroupBy)
+	assert.Equal(t, []string{"effectiveTime"}, fi.RequiredFields)
+}
+
+func TestSortGroupByUnknownDropped(t *testing.T) {
+	fb := caseTestFactory.NewFilter(context.Background())
+	fi, err := fb.Eq("id", 1).
+		Sort("nosuchfield").
+		GroupBy("nosuchfield").
+		RequiredFields("nosuchfield").
+		Finalize()
+	assert.NoError(t, err)
+	assert.Empty(t, fi.Sort)
+	assert.Empty(t, fi.GroupBy)
+	assert.Empty(t, fi.RequiredFields)
+}
