@@ -55,8 +55,7 @@ func SQLStateConstraintViolationClassifier(err error) *ConstraintViolation {
 // for example the MsgDBInsertFailed error returned from Insert/InsertTx wraps the underlying driver error - and
 // the whole chain is inspected.
 //
-// This lets callers rely on a UNIQUE index in the database to enforce uniqueness, and map the resulting error
-// to a conflict response, rather than racing a pre-insert existence check against concurrent inserts.
+// This lets callers rely on a UNIQUE index in the database to enforce uniqueness, and map the resulting error.
 //
 // If one or more constraint names are supplied, only a violation of one of those constraints is a match.
 // Constraint names are only available when the provider supplies a ConstraintViolationClassifier that extracts
