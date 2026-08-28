@@ -19,14 +19,15 @@ package dbsql
 import (
 	"context"
 	"database/sql"
+	"errors"
 
 	sq "github.com/Masterminds/squirrel"
 	migratedb "github.com/golang-migrate/migrate/v4/database"
 	"github.com/golang-migrate/migrate/v4/database/sqlite3"
 	"github.com/hyperledger-firefly/common/pkg/config"
 
-	// Import SQLite driver
-	_ "github.com/mattn/go-sqlite3"
+	// SQLite driver - also used to classify constraint errors
+	sqlite3driver "github.com/mattn/go-sqlite3"
 )
 
 func InitSQLiteConfig(conf config.Section) {
@@ -60,6 +61,7 @@ func (p *sqLiteProvider) Features() SQLFeatures {
 	features := DefaultSQLProviderFeatures()
 	features.PlaceholderFormat = sq.Dollar
 	features.UseILIKE = false // Not supported
+	features.ConstraintViolationClassifier = sqliteConstraintViolationClassifier
 	return features
 }
 
@@ -74,4 +76,19 @@ func (p *sqLiteProvider) Open(url string) (*sql.DB, error) {
 
 func (p *sqLiteProvider) GetMigrationDriver(db *sql.DB) (migratedb.Driver, error) {
 	return sqlite3.WithInstance(db, &sqlite3.Config{})
+}
+
+// sqliteConstraintViolationClassifier maps SQLite's extended constraint error codes onto the equivalent SQLSTATE.
+// SQLite does not report the constraint name, only the column list in the message text.
+func sqliteConstraintViolationClassifier(err error) *ConstraintViolation {
+	var sqliteErr sqlite3driver.Error
+	if errors.As(err, &sqliteErr) {
+		switch sqliteErr.ExtendedCode {
+		case sqlite3driver.ErrConstraintUnique, sqlite3driver.ErrConstraintPrimaryKey:
+			return &ConstraintViolation{SQLState: SQLStateUniqueViolation}
+		case sqlite3driver.ErrConstraintForeignKey:
+			return &ConstraintViolation{SQLState: SQLStateForeignKeyViolation}
+		}
+	}
+	return nil
 }

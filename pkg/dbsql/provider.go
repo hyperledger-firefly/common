@@ -38,6 +38,12 @@ type SQLFeatures struct {
 	// When >0 and MultiRowInsert is true, InsertMany will chunk rows so that
 	// rows*columns never exceeds this limit. PostgreSQL's wire protocol limit is 65535.
 	MaxPlaceholders int
+	// ConstraintViolationClassifier lets the provider classify a driver error as an integrity constraint violation,
+	// including the name of the violated constraint where the driver exposes it. Return nil for any other error.
+	// When unset, Database.IsUniqueViolation / IsForeignKeyViolation fall back to SQLStateConstraintViolationClassifier,
+	// which checks for a SQLState() method on the error (implemented by both lib/pq and pgx) but cannot identify
+	// the constraint name.
+	ConstraintViolationClassifier func(err error) *ConstraintViolation
 }
 
 func DefaultSQLProviderFeatures() SQLFeatures {

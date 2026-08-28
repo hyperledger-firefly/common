@@ -49,6 +49,12 @@ type ffError struct {
 	status int
 }
 
+// Unwrap exposes the wrapped error so that errors.Is / errors.As can inspect the full chain, including
+// the original cause passed to WrapError (for example a database driver error)
+func (ffe *ffError) Unwrap() error {
+	return ffe.error
+}
+
 func (ffe *ffError) MessageKey() ErrorMessageKey {
 	return ffe.msgKey
 }

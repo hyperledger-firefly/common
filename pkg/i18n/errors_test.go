@@ -18,6 +18,7 @@ package i18n
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -64,4 +65,30 @@ func TestWrapNilError(t *testing.T) {
 func TestStackWithDebug(t *testing.T) {
 	err := WrapError(context.Background(), nil, MsgConfigFailed)
 	assert.Error(t, err)
+}
+
+type testCauseError struct{ code string }
+
+func (e *testCauseError) Error() string { return "cause " + e.code }
+
+func TestWrapErrorUnwrap(t *testing.T) {
+	ctx := context.Background()
+	cause := &testCauseError{code: "23505"}
+
+	// Wrapped once by WrapError, then again by a caller with a different message
+	err := WrapError(ctx, WrapError(ctx, cause, MsgDBInsertFailed), MsgDBInitFailed)
+	assert.Regexp(t, "FF00173.*FF00177.*cause 23505", err)
+
+	var target *testCauseError
+	assert.True(t, errors.As(err, &target))
+	assert.Equal(t, "23505", target.code)
+	assert.True(t, errors.Is(err, cause))
+
+	// The ffError itself is still reachable in the chain
+	var ffe *ffError
+	assert.True(t, errors.As(err, &ffe))
+	assert.Equal(t, MsgDBInitFailed, ffe.msgKey)
+
+	// NewError has no cause beyond the message itself
+	assert.False(t, errors.As(NewError(ctx, MsgDBInitFailed), &target))
 }
