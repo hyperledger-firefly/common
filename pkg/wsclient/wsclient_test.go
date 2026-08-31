@@ -41,6 +41,17 @@ func generateConfig() *WSConfig {
 	return &WSConfig{}
 }
 
+// lastPingCompleted reads the heartbeat state of the current connection race-safely
+func lastPingCompleted(wsc WSClient) time.Time {
+	c := wsc.(*wsClient).currentConn()
+	if c == nil {
+		return time.Time{}
+	}
+	c.heartbeatMux.Lock()
+	defer c.heartbeatMux.Unlock()
+	return c.lastPingCompleted
+}
+
 func TestWSClientE2ETLS(t *testing.T) {
 
 	publicKeyFile, privateKeyFile := GenerateTLSCertficates(t)
@@ -122,7 +133,7 @@ func TestWSClientE2ETLS(t *testing.T) {
 
 	// Check heartbeating works
 	beforePing := time.Now()
-	for wsc.(*wsClient).lastPingCompleted.Before(beforePing) {
+	for lastPingCompleted(wsc).Before(beforePing) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
@@ -185,7 +196,7 @@ func TestWSClientE2EBG(t *testing.T) {
 
 	// Check heartbeating works
 	beforePing := time.Now()
-	for wsc.(*wsClient).lastPingCompleted.Before(beforePing) {
+	for lastPingCompleted(wsc).Before(beforePing) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
@@ -253,7 +264,7 @@ func TestWSClientE2EReceiveExt(t *testing.T) {
 
 	// Check heartbeating works
 	beforePing := time.Now()
-	for wsc.(*wsClient).lastPingCompleted.Before(beforePing) {
+	for lastPingCompleted(wsc).Before(beforePing) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
@@ -489,10 +500,14 @@ func TestWSSendCanceledContext(t *testing.T) {
 func TestWSSenderClosed(t *testing.T) {
 
 	w := &wsClient{
-		send:     make(chan []byte),
+		send: make(chan []byte),
+	}
+	c := &wsConnection{
+		w:        w,
 		sendDone: make(chan []byte),
 	}
-	close(w.sendDone)
+	w.current = c
+	close(c.sendDone)
 
 	err := w.Send(context.Background(), []byte(`sent after close`))
 	assert.Regexp(t, "FF00147", err)
@@ -520,17 +535,20 @@ func TestWSReadLoopSendFailure(t *testing.T) {
 	assert.NoError(t, err)
 	<-toServer
 	w := &wsClient{
-		ctx:      context.Background(),
+		ctx: context.Background(),
+	}
+	c := &wsConnection{
+		w:        w,
+		conn:     wsconn,
 		sendDone: make(chan []byte, 1),
-		wsconn:   wsconn,
 	}
 
 	// Queue a message for the receiver, then immediately close the sender channel
 	fromServer <- `some data from server`
-	close(w.sendDone)
+	close(c.sendDone)
 
 	// Ensure the readLoop exits immediately
-	w.readLoop()
+	c.readLoop()
 
 	// Try reconnect, should fail here
 	_, _, err = websocket.DefaultDialer.Dial(url, nil)
@@ -550,17 +568,20 @@ func TestWSReadLoopExtSendFailure(t *testing.T) {
 	<-toServer
 	w := &wsClient{
 		ctx:           context.Background(),
-		sendDone:      make(chan []byte, 1),
-		wsconn:        wsconn,
 		useReceiveExt: true,
+	}
+	c := &wsConnection{
+		w:        w,
+		conn:     wsconn,
+		sendDone: make(chan []byte, 1),
 	}
 
 	// Queue a message for the receiver, then immediately close the sender channel
 	fromServer <- `some data from server`
-	close(w.sendDone)
+	close(c.sendDone)
 
 	// Ensure the readLoop exits immediately
-	w.readLoopExt()
+	c.readLoopExt()
 
 	// Try reconnect, should fail here
 	_, _, err = websocket.DefaultDialer.Dial(url, nil)
@@ -580,10 +601,13 @@ func TestWSReadLoopExtProcessedFailure(t *testing.T) {
 	<-toServer
 	w := &wsClient{
 		ctx:           context.Background(),
-		sendDone:      make(chan []byte, 1),
-		wsconn:        wsconn,
 		receiveExt:    make(chan *WSPayload),
 		useReceiveExt: true,
+	}
+	c := &wsConnection{
+		w:        w,
+		conn:     wsconn,
+		sendDone: make(chan []byte, 1),
 	}
 
 	// Queue a message for the receiver, then immediately close the sender channel
@@ -592,12 +616,12 @@ func TestWSReadLoopExtProcessedFailure(t *testing.T) {
 	// Ensure the readLoop exits immediately
 	readLoopDone := make(chan struct{})
 	go func() {
-		w.readLoopExt()
+		c.readLoopExt()
 		close(readLoopDone)
 	}()
 
 	_ = <-w.receiveExt // we don't bother to ack this, making the client wait indefinitely
-	close(w.sendDone)
+	close(c.sendDone)
 	<-readLoopDone
 
 	// Try reconnect, should fail here
@@ -622,8 +646,10 @@ func TestWSReconnectFail(t *testing.T) {
 		receiveExt: make(chan *WSPayload),
 		send:       make(chan []byte),
 		closing:    make(chan struct{}),
-		wsconn:     wsconn,
 	}
+	c := w.newConnection(wsconn)
+	close(c.promoted)
+	w.current = c
 	close(w.send) // will mean sender exits immediately
 
 	w.receiveReconnectLoop()
@@ -645,9 +671,11 @@ func TestWSDisableReconnect(t *testing.T) {
 		receiveExt:       make(chan *WSPayload),
 		send:             make(chan []byte),
 		closing:          make(chan struct{}),
-		wsconn:           wsconn,
 		disableReconnect: true,
 	}
+	c := w.newConnection(wsconn)
+	close(c.promoted)
+	w.current = c
 
 	w.receiveReconnectLoop()
 }
@@ -666,12 +694,13 @@ func TestWSSendFail(t *testing.T) {
 		receiveExt: make(chan *WSPayload),
 		send:       make(chan []byte, 1),
 		closing:    make(chan struct{}),
-		sendDone:   make(chan []byte, 1),
-		wsconn:     wsconn,
 	}
+	c := w.newConnection(wsconn)
+	close(c.promoted)
+	w.current = c
 	w.send <- []byte(`wakes sender`)
-	w.sendLoop(make(chan struct{}))
-	<-w.sendDone
+	c.sendLoop()
+	<-c.sendDone
 }
 
 func TestWSSendInstructClose(t *testing.T) {
@@ -688,13 +717,11 @@ func TestWSSendInstructClose(t *testing.T) {
 		receiveExt: make(chan *WSPayload),
 		send:       make(chan []byte, 1),
 		closing:    make(chan struct{}),
-		sendDone:   make(chan []byte, 1),
-		wsconn:     wsconn,
 	}
-	receiverClosed := make(chan struct{})
-	close(receiverClosed)
-	w.sendLoop(receiverClosed)
-	<-w.sendDone
+	c := w.newConnection(wsconn)
+	close(c.receiverDone)
+	c.sendLoop()
+	<-c.sendDone
 }
 
 func TestHeartbeatTimedout(t *testing.T) {
@@ -702,12 +729,19 @@ func TestHeartbeatTimedout(t *testing.T) {
 	now := time.Now()
 	w := &wsClient{
 		ctx:               context.Background(),
-		sendDone:          make(chan []byte),
 		heartbeatInterval: 1 * time.Microsecond,
-		activePingSent:    &now,
+	}
+	c := &wsConnection{
+		w:              w,
+		send:           make(chan *trackedSend),
+		sendDone:       make(chan []byte),
+		receiverDone:   make(chan struct{}),
+		promoted:       make(chan struct{}),
+		demoted:        make(chan struct{}),
+		activePingSent: &now,
 	}
 
-	w.sendLoop(make(chan struct{}))
+	c.sendLoop()
 
 }
 
@@ -723,16 +757,24 @@ func TestHeartbeatSendFailed(t *testing.T) {
 	err = wsc.Connect()
 	assert.NoError(t, err)
 
-	// Close and use the underlying wsconn to drive a failure to send a heartbeat
-	wsc.(*wsClient).wsconn.Close()
+	// Close and use the underlying connection to drive a failure to send a heartbeat
+	wsconn := wsc.(*wsClient).currentConn().conn
+	wsconn.Close()
 	w := &wsClient{
 		ctx:               context.Background(),
-		sendDone:          make(chan []byte),
 		heartbeatInterval: 1 * time.Microsecond,
-		wsconn:            wsc.(*wsClient).wsconn,
+	}
+	c := &wsConnection{
+		w:            w,
+		conn:         wsconn,
+		send:         make(chan *trackedSend),
+		sendDone:     make(chan []byte),
+		receiverDone: make(chan struct{}),
+		promoted:     make(chan struct{}),
+		demoted:      make(chan struct{}),
 	}
 
-	w.sendLoop(make(chan struct{}))
+	c.sendLoop()
 
 }
 
@@ -824,7 +866,7 @@ func TestRequestWithRateLimiter(t *testing.T) {
 	for i := 0; i < expectedNumberOfRequest; i++ {
 		go func() {
 			// Send some data back
-			err = wsc.Send(context.Background(), []byte(`some data to server`))
+			err := wsc.Send(context.Background(), []byte(`some data to server`))
 			assert.NoError(t, err)
 
 			// Check the sevrer got it
@@ -893,7 +935,7 @@ func TestRequestWithRateLimiterHighBurst(t *testing.T) {
 	for i := 0; i < expectedNumberOfRequest; i++ {
 		go func() {
 			// Send some data back
-			err = wsc.Send(context.Background(), []byte(`some data to server`))
+			err := wsc.Send(context.Background(), []byte(`some data to server`))
 			assert.NoError(t, err)
 
 			// Check the sevrer got it

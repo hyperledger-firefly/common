@@ -141,6 +141,88 @@ func NewTestTLSWSServer(testReq func(req *http.Request), publicKeyFile *os.File,
 	}, nil
 }
 
+// TestWSConnection is a single server-side connection accepted by NewTestWSServerMulti
+type TestWSConnection struct {
+	ToServer   chan string   // messages the server received on this connection
+	FromServer chan string   // push messages here to send them to the client on this connection
+	Done       chan struct{} // closed when this connection has closed
+	CloseConn  func()        // server-side close of this connection
+}
+
+// NewTestWSServerMulti creates a test server that accepts an unlimited sequence of connections,
+// emitting each accepted connection on the connections channel - allowing tests of reconnect
+// and connection cycling, where more than one connection can be active at the same time
+func NewTestWSServerMulti(testReq func(req *http.Request)) (connections chan *TestWSConnection, url string, rejectNext func(bool), done func()) {
+	upgrader := &websocket.Upgrader{WriteBufferSize: 1024, ReadBufferSize: 1024}
+	connections = make(chan *TestWSConnection, 16)
+	mu := sync.Mutex{}
+	rejecting := false
+	var live []*websocket.Conn
+	svr := httptest.NewServer(http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
+		if testReq != nil {
+			testReq(req)
+		}
+		mu.Lock()
+		reject := rejecting
+		mu.Unlock()
+		if reject {
+			res.WriteHeader(500)
+			return
+		}
+		ws, err := upgrader.Upgrade(res, req, http.Header{})
+		if err != nil {
+			return
+		}
+		mu.Lock()
+		live = append(live, ws)
+		mu.Unlock()
+		c := &TestWSConnection{
+			ToServer:   make(chan string, 16),
+			FromServer: make(chan string, 16),
+			Done:       make(chan struct{}),
+			CloseConn:  func() { _ = ws.Close() },
+		}
+		go func() {
+			defer close(c.Done)
+			for {
+				_, data, err := ws.ReadMessage()
+				if err != nil {
+					return
+				}
+				c.ToServer <- string(data)
+			}
+		}()
+		go func() {
+			for {
+				select {
+				case data := <-c.FromServer:
+					_ = ws.WriteMessage(websocket.TextMessage, []byte(data))
+				case <-c.Done:
+					return
+				}
+			}
+		}()
+		connections <- c
+	}))
+	return connections,
+		fmt.Sprintf("ws://%s", svr.Listener.Addr()),
+		func(reject bool) {
+			mu.Lock()
+			rejecting = reject
+			mu.Unlock()
+		},
+		func() {
+			mu.Lock()
+			conns := live
+			live = nil
+			mu.Unlock()
+			for _, ws := range conns {
+				_ = ws.Close()
+			}
+			svr.Close()
+		}
+}
+
 // NewTestWSServer creates a little test server for packages (including wsclient itself) to use in unit tests
 func NewTestWSServer(testReq func(req *http.Request)) (toServer, fromServer chan string, url string, done func()) {
 	upgrader := &websocket.Upgrader{WriteBufferSize: 1024, ReadBufferSize: 1024}
@@ -149,13 +231,16 @@ func NewTestWSServer(testReq func(req *http.Request)) (toServer, fromServer chan
 	sendDone := make(chan struct{})
 	receiveDone := make(chan struct{})
 	connected := false
+	mu := sync.Mutex{}
 	svr := httptest.NewServer(http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
+		mu.Lock()
 		if testReq != nil {
 			testReq(req)
 		}
 		if connected {
 			// test server only handles one open connection, as it only has one set of channels
 			res.WriteHeader(409)
+			mu.Unlock()
 			return
 		}
 		ws, _ := upgrader.Upgrade(res, req, http.Header{})
@@ -177,11 +262,15 @@ func NewTestWSServer(testReq func(req *http.Request)) (toServer, fromServer chan
 			}
 		}()
 		connected = true
+		mu.Unlock()
 	}))
 	return toServer, fromServer, fmt.Sprintf("ws://%s", svr.Listener.Addr()), func() {
 		close(fromServer)
 		svr.Close()
-		if connected {
+		mu.Lock()
+		wasConnected := connected
+		mu.Unlock()
+		if wasConnected {
 			<-sendDone
 			<-receiveDone
 		}
