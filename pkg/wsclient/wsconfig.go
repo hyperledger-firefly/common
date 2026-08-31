@@ -18,6 +18,7 @@ package wsclient
 
 import (
 	"context"
+	"net"
 	"time"
 
 	"github.com/hyperledger-firefly/common/pkg/config"
@@ -123,18 +124,12 @@ func GenerateConfig(ctx context.Context, conf config.Section) (*WSConfig, error)
 
 	// Build the underlying TCP dialer with the custom DNS resolver and SSRF egress guard,
 	// from the same "net" subsection that ffresty.InitConfig set up on this config tree.
+	var netDialer *net.Dialer
+	resolver := ffdns.NewResolver(conf.SubSection("dns"))
 	netCfg, err := ffnet.GenerateConfig(conf.SubSection("net"))
-	if err != nil {
-		return nil, err
+	if err == nil {
+		netDialer, err = ffnet.NewDialer(ctx, netCfg, resolver)
 	}
-
-	dnsCfg, err := ffdns.GenerateConfig(conf.SubSection("dns"))
-	if err != nil {
-		return nil, err
-	}
-	resolver := ffdns.NewResolverWithConfig(dnsCfg)
-
-	netDialer, err := ffnet.NewDialer(ctx, netCfg, resolver)
 	if err != nil {
 		return nil, err
 	}

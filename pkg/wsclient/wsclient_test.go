@@ -22,6 +22,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -377,6 +378,17 @@ func TestWSClosedWhileConnecting(t *testing.T) {
 
 	err = wsc.Connect()
 	assert.Regexp(t, "FF00147", err)
+}
+
+func TestWSClientNetDialer(t *testing.T) {
+	wsConfig := generateConfig()
+	wsConfig.HTTPURL = "http://test:12345"
+	wsConfig.NetDialer = &net.Dialer{}
+
+	wsc, err := NewWithConfig(context.Background(), wsConfig)
+	assert.NoError(t, err)
+	defer wsc.Close()
+	assert.NotNil(t, wsc.(*wsClient).wsdialer.NetDialContext)
 }
 
 func TestWSClientBadWSURL(t *testing.T) {
