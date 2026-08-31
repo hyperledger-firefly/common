@@ -95,11 +95,11 @@ func TestWSConnectionCycleE2E(t *testing.T) {
 	wsConfig.PreDisconnectHandler = func(ctx context.Context, w WSClient) error {
 		return w.Send(ctx, []byte(`unsubscribe`))
 	}
-	afterConnect := func(ctx context.Context, w WSClient) error {
+	wsConfig.PostConnectHandler = func(ctx context.Context, w WSClient) error {
 		return w.Send(ctx, []byte(`subscribe`))
 	}
 
-	wsc, err := New(context.Background(), wsConfig, nil, afterConnect)
+	wsc, err := NewWithConfig(context.Background(), wsConfig)
 	assert.NoError(t, err)
 	err = wsc.Connect()
 	assert.NoError(t, err)

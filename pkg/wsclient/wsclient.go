@@ -71,7 +71,9 @@ type WSConfig struct {
 	// ConnectionCycleQuiesceTime is how long the old connection continues to deliver inbound
 	// messages after a connection cycle switches sends to the new connection, before it is closed
 	ConnectionCycleQuiesceTime time.Duration `json:"connectionCycleQuiesceTime,omitempty"`
-	// PreDisconnectHandler cannot be set in JSON - must be configured on the code interface
+	// The lifecycle handlers cannot be set in JSON - they must be configured on the code interface
+	PreConnectHandler    WSPreConnectHandler    `json:"-"`
+	PostConnectHandler   WSPostConnectHandler   `json:"-"`
 	PreDisconnectHandler WSPreDisconnectHandler `json:"-"`
 	// This one cannot be set in JSON - must be configured on the code interface
 	ReceiveExt bool
@@ -157,8 +159,18 @@ type WSPostConnectHandler func(ctx context.Context, w WSClient) error
 //   - When cycling the connection (after the new connection is established, before post-connect is called)
 type WSPreDisconnectHandler func(ctx context.Context, w WSClient) error
 
-// Creates a new outbound client that can be connected to a remote server
+// New creates a new outbound client that can be connected to a remote server.
+// ** Recommend using NewWithConfig directly **
 func New(ctx context.Context, config *WSConfig, beforeConnect WSPreConnectHandler, afterConnect WSPostConnectHandler) (WSClient, error) {
+	conf := *config // copy, so we don't modify the supplied config with the handler overrides
+	conf.PreConnectHandler = beforeConnect
+	conf.PostConnectHandler = afterConnect
+	return NewWithConfig(ctx, &conf)
+}
+
+// NewWithConfig creates a new outbound WebSocket client with configuration,
+// including lifecycle hooks
+func NewWithConfig(ctx context.Context, config *WSConfig) (WSClient, error) {
 	l := log.L(ctx)
 	wsURL, err := buildWSUrl(ctx, config)
 	if err != nil {
@@ -191,8 +203,8 @@ func New(ctx context.Context, config *WSConfig, beforeConnect WSPreConnectHandle
 		headers:              make(http.Header),
 		send:                 make(chan []byte),
 		closing:              make(chan struct{}),
-		beforeConnect:        beforeConnect,
-		afterConnect:         afterConnect,
+		beforeConnect:        config.PreConnectHandler,
+		afterConnect:         config.PostConnectHandler,
 		beforeDisconnect:     config.PreDisconnectHandler,
 		heartbeatInterval:    config.HeartbeatInterval,
 		connCycleInterval:    config.ConnectionCycleInterval,
