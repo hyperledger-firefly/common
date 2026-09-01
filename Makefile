@@ -1,9 +1,8 @@
 VGO=go
 GOFILES := $(shell find pkg -name '*.go' -print)
 GOBIN := $(shell $(VGO) env GOPATH)/bin
-LOCALBIN := $(shell pwd)/bin
 LINT := $(GOBIN)/golangci-lint
-MOCKERY := $(LOCALBIN)/mockery
+MOCKERY := $(GOBIN)/mockery
 
 # Expect that FireFly compiles with CGO disabled
 CGO_ENABLED=0
@@ -20,7 +19,7 @@ coverage: test coverage.html
 lint: ${LINT}
 		GOGC=20 $(LINT) run -v --timeout 5m --fast --allow-parallel-runners
 ${MOCKERY}:
-		GOBIN=$(LOCALBIN) $(VGO) install github.com/vektra/mockery/v2@latest
+		$(VGO) install github.com/vektra/mockery/v2@latest
 ${LINT}:
 		$(VGO) install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
 dbmigrate:
@@ -38,7 +37,6 @@ $(eval $(call makemock, pkg/httpserver,            GoHTTPServer,       httpserve
 $(eval $(call makemock, pkg/auth,                  Plugin,             authmocks))
 $(eval $(call makemock, pkg/wsserver,              Protocol,           wsservermocks))
 $(eval $(call makemock, pkg/wsserver,              WebSocketServer,    wsservermocks))
-$(eval $(call makemock, pkg/metric,                MetricsRegistry,    metricmocks))
 $(eval $(call makemock, pkg/dbsql,                 CRUD,               crudmocks))
 
 firefly-common: ${GOFILES}

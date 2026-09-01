@@ -89,15 +89,10 @@ func loggerFromContext(ctx context.Context) *logrus.Entry {
 	return logger.(*logrus.Entry)
 }
 
-// SetLevel allows for dynamically changing the log level
 func SetLevel(level string) {
 	switch strings.ToLower(level) {
 	case "error":
 		logrus.SetLevel(logrus.ErrorLevel)
-	case "warn":
-		logrus.SetLevel(logrus.WarnLevel)
-	case "warning":
-		logrus.SetLevel(logrus.WarnLevel)
 	case "debug":
 		logrus.SetLevel(logrus.DebugLevel)
 	case "trace":
@@ -105,11 +100,6 @@ func SetLevel(level string) {
 	default:
 		logrus.SetLevel(logrus.InfoLevel)
 	}
-}
-
-// GetLevel returns the currently configured log level
-func GetLevel() string {
-	return logrus.GetLevel().String()
 }
 
 type Formatting struct {

@@ -1,4 +1,4 @@
-// Copyright © 2024-2026 Kaleido, Inc.
+// Copyright © 2024 Kaleido, Inc.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -58,49 +58,5 @@ func TestBuildPostgreSQLOptimizedUpsertFail(t *testing.T) {
 
 	_, err := BuildPostgreSQLOptimizedUpsert(context.Background(), "", "", []string{}, []string{}, "", map[string]driver.Value{})
 	assert.Regexp(t, "FF00247", err)
-
-}
-
-func TestGetPostgreSQLDatabaseName(t *testing.T) {
-
-	dbName, err := GetPostgreSQLDatabaseName("postgres://user:password@host:5432/dbname")
-	assert.NoError(t, err)
-	assert.Equal(t, "dbname", dbName)
-
-	dbName, err = GetPostgreSQLDatabaseName("postgres://user:password@host:5432/dbnameWithParam?param=value")
-	assert.NoError(t, err)
-	assert.Equal(t, "dbnameWithParam", dbName)
-
-	dbName, err = GetPostgreSQLDatabaseName("postgres://user:password@host:5432/dbnameWithParams?param=value&param=value")
-	assert.NoError(t, err)
-	assert.Equal(t, "dbnameWithParams", dbName)
-
-	// postgresql:// scheme variant
-	dbName, err = GetPostgreSQLDatabaseName("postgresql://user:password@host:5432/mydb")
-	assert.NoError(t, err)
-	assert.Equal(t, "mydb", dbName)
-
-	// Password with special characters (percent-encoded per RFC 3986)
-	dbName, err = GetPostgreSQLDatabaseName("postgres://user:p%40ss%2Fword@host:5432/mydb")
-	assert.NoError(t, err)
-	assert.Equal(t, "mydb", dbName)
-
-	// No dbname in scheme URL — must error, not return host/user/password
-	_, err = GetPostgreSQLDatabaseName("postgres://user:password@host:5432")
-	assert.Regexp(t, "FF00262", err)
-
-	_, err = GetPostgreSQLDatabaseName("postgres://user:password@host:5432/")
-	assert.Regexp(t, "FF00262", err)
-
-	_, err = GetPostgreSQLDatabaseName("postgres://user:password@host:5432?sslmode=disable")
-	assert.Regexp(t, "FF00262", err)
-
-	// No scheme — not a valid libpq URI
-	_, err = GetPostgreSQLDatabaseName("host:5432/dbname")
-	assert.Regexp(t, "FF00262", err)
-
-	// Empty string
-	_, err = GetPostgreSQLDatabaseName("")
-	assert.Regexp(t, "FF00262", err)
 
 }

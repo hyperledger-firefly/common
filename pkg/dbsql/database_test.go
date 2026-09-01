@@ -25,11 +25,9 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	sq "github.com/Masterminds/squirrel"
 	"github.com/hyperledger-firefly/common/pkg/ffapi"
-	"github.com/hyperledger-firefly/common/pkg/metric"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
 )
 
 type testPreCommitAccumulator struct {
@@ -80,13 +78,6 @@ func TestInitDatabaseFeatures(t *testing.T) {
 	assert.Equal(t, false, s.Features().MultiRowInsert)
 }
 
-func TestInitDatabaseGetDatabaseNameFailed(t *testing.T) {
-	mp := NewMockProvider()
-	mp.GetDatabaseNameError = fmt.Errorf("pop")
-	err := mp.Database.Init(context.Background(), mp, mp.config)
-	assert.Regexp(t, "FF00173.*pop", err)
-}
-
 func TestInitDatabaseMaxPlaceholdersProviderDefault(t *testing.T) {
 	mp := NewMockProvider()
 	mp.MaxPlaceholders = 65535
@@ -111,13 +102,8 @@ func TestInitDatabaseMigrationOpenFailed(t *testing.T) {
 	assert.Regexp(t, "FF00184.*pop", err)
 }
 
-func TestInitDatabaseMigrationOk(t *testing.T) {
+func TestInitDatabaseMigrationFailed(t *testing.T) {
 	mp := NewMockProvider()
-	defer mp.Close()
-	mr := metric.NewPrometheusMetricsRegistry("ut")
-	err := EnableDBMetrics(context.Background(), mr)
-	require.NoError(t, err)
-	defer func() { metricsRegistry = nil; metricsManager = nil }()
 	mp.mmg.On("Lock").Return(nil)
 	mp.mmg.On("Version").Return(-1, false, nil)
 	mp.mmg.On("SetVersion", 1, true).Return(nil)
@@ -130,11 +116,11 @@ func TestInitDatabaseMigrationOk(t *testing.T) {
 	mp.mmg.On("Unlock").Return(nil)
 	mp.config.Set(SQLConfMigrationsAuto, true)
 	mp.config.Set(SQLConfMigrationsDirectory, "../../test/dbmigrations")
-	err = mp.Database.Init(context.Background(), mp, mp.config)
+	err := mp.Database.Init(context.Background(), mp, mp.config)
 	assert.NoError(t, err)
 }
 
-func TestInitDatabaseMigrationFailed(t *testing.T) {
+func TestInitDatabaseMigrationOk(t *testing.T) {
 	mp := NewMockProvider()
 	defer mp.Close()
 	mp.mmg.On("Lock").Return(nil)
