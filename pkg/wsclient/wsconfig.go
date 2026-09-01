@@ -18,6 +18,7 @@ package wsclient
 
 import (
 	"context"
+	"net"
 	"time"
 
 	"github.com/hyperledger-firefly/common/pkg/config"
@@ -28,11 +29,12 @@ import (
 )
 
 const (
-	defaultInitialConnectAttempts = 5
-	defaultBufferSize             = "16Kb"
-	defaultHeartbeatInterval      = "30s"            // up to a minute to detect a dead connection
-	defaultConnectionTimeout      = 45 * time.Second // 45 seconds - the built in default for gorilla/websocket
-	defaultRetryBackoffFactor     = 2.0
+	defaultInitialConnectAttempts     = 5
+	defaultBufferSize                 = "16Kb"
+	defaultHeartbeatInterval          = "30s"            // up to a minute to detect a dead connection
+	defaultConnectionTimeout          = 45 * time.Second // 45 seconds - the built in default for gorilla/websocket
+	defaultRetryBackoffFactor         = 2.0
+	defaultConnectionCycleQuiesceTime = "5s" // only used when connection cycling is enabled
 )
 
 const (
@@ -54,6 +56,10 @@ const (
 	WSConfigKeyHeartbeatInterval = "ws.heartbeatInterval"
 	// WSConnectionTimeout is the amount of time to wait while attempting to establish a connection (or automatic reconnection)
 	WSConfigKeyConnectionTimeout = "ws.connectionTimeout"
+	// WSConfigKeyConnectionCycleInterval when non-zero enables proactive cycling of the connection on this interval - the new connection is fully established before the old one is quiesced and closed
+	WSConfigKeyConnectionCycleInterval = "ws.connectionCycleInterval"
+	// WSConfigKeyConnectionCycleQuiesceTime is how long the old connection continues to deliver inbound messages after a connection cycle, before it is closed
+	WSConfigKeyConnectionCycleQuiesceTime = "ws.connectionCycleQuiesceTime"
 	// WSConfigDelayFactor the exponential backoff factor for delay
 	WSConfigDelayFactor = "retry.factor"
 )
@@ -77,6 +83,8 @@ func InitConfig(conf config.Section) {
 	conf.AddKnownKey(WSConfigURL)
 	conf.AddKnownKey(WSConfigKeyHeartbeatInterval, defaultHeartbeatInterval)
 	conf.AddKnownKey(WSConfigKeyConnectionTimeout, defaultConnectionTimeout)
+	conf.AddKnownKey(WSConfigKeyConnectionCycleInterval) // no default - connection cycling is disabled unless set
+	conf.AddKnownKey(WSConfigKeyConnectionCycleQuiesceTime, defaultConnectionCycleQuiesceTime)
 	conf.AddKnownKey(WSConfigDelayFactor, defaultRetryBackoffFactor)
 	InitConfigWrap(conf)
 }
@@ -102,6 +110,9 @@ func GenerateConfig(ctx context.Context, conf config.Section) (*WSConfig, error)
 		AuthPassword:           conf.GetString(ffresty.HTTPConfigAuthPassword),
 		HeartbeatInterval:      conf.GetDuration(WSConfigKeyHeartbeatInterval),
 		ConnectionTimeout:      conf.GetDuration(WSConfigKeyConnectionTimeout),
+
+		ConnectionCycleInterval:    conf.GetDuration(WSConfigKeyConnectionCycleInterval),
+		ConnectionCycleQuiesceTime: conf.GetDuration(WSConfigKeyConnectionCycleQuiesceTime),
 	}
 	tlsSection := conf.SubSection("tls")
 	tlsClientConfig, err := fftls.ConstructTLSConfig(ctx, tlsSection, fftls.ClientType)
@@ -113,18 +124,12 @@ func GenerateConfig(ctx context.Context, conf config.Section) (*WSConfig, error)
 
 	// Build the underlying TCP dialer with the custom DNS resolver and SSRF egress guard,
 	// from the same "net" subsection that ffresty.InitConfig set up on this config tree.
+	var netDialer *net.Dialer
+	resolver := ffdns.NewResolver(conf.SubSection("dns"))
 	netCfg, err := ffnet.GenerateConfig(conf.SubSection("net"))
-	if err != nil {
-		return nil, err
+	if err == nil {
+		netDialer, err = ffnet.NewDialer(ctx, netCfg, resolver)
 	}
-
-	dnsCfg, err := ffdns.GenerateConfig(conf.SubSection("dns"))
-	if err != nil {
-		return nil, err
-	}
-	resolver := ffdns.NewResolverWithConfig(dnsCfg)
-
-	netDialer, err := ffnet.NewDialer(ctx, netCfg, resolver)
 	if err != nil {
 		return nil, err
 	}

@@ -62,6 +62,19 @@ type WSConfig struct {
 	// underlying TCP connection. Built by GenerateConfig from the net config; cannot be set in
 	// JSON. Left nil for hand-built configs, in which case the default net dialer is used.
 	NetDialer *net.Dialer `json:"-"`
+	// ConnectionCycleInterval when non-zero enables proactive replacement of the connection
+	// on this interval - the new connection is fully established (including afterConnect)
+	// before sends switch over and the old connection is quiesced and closed.
+	// The interval restarts from the end of each quiesce/close, and from any reconnect
+	// due to a connection error - so at most two connections ever exist concurrently.
+	ConnectionCycleInterval time.Duration `json:"connectionCycleInterval,omitempty"`
+	// ConnectionCycleQuiesceTime is how long the old connection continues to deliver inbound
+	// messages after a connection cycle switches sends to the new connection, before it is closed
+	ConnectionCycleQuiesceTime time.Duration `json:"connectionCycleQuiesceTime,omitempty"`
+	// The lifecycle handlers cannot be set in JSON - they must be configured on the code interface
+	PreConnectHandler    WSPreConnectHandler    `json:"-"`
+	PostConnectHandler   WSPostConnectHandler   `json:"-"`
+	PreDisconnectHandler WSPreDisconnectHandler `json:"-"`
 	// This one cannot be set in JSON - must be configured on the code interface
 	ReceiveExt bool
 }
@@ -113,25 +126,24 @@ type wsClient struct {
 	backgroundConnect    bool
 	initialRetryAttempts int
 	wsdialer             *websocket.Dialer
-	wsconn               *websocket.Conn
+	current              *wsConnection
 	connRetry            retry.Retry
 	closed               bool
 	useReceiveExt        bool
 	receive              chan []byte
 	receiveExt           chan *WSPayload
 	send                 chan []byte
-	sendDone             chan []byte
 	bgConnCancelCtx      context.CancelFunc
 	bgConnDone           chan struct{}
 	closing              chan struct{}
 	beforeConnect        WSPreConnectHandler
 	afterConnect         WSPostConnectHandler
+	beforeDisconnect     WSPreDisconnectHandler
 	disableReconnect     bool
 	heartbeatInterval    time.Duration
-	stateMux             sync.Mutex // guards closed, wsconn, bgConnDone and bgConnCancelCtx
-	heartbeatMux         sync.Mutex
-	activePingSent       *time.Time
-	lastPingCompleted    time.Time
+	connCycleInterval    time.Duration
+	connCycleQuiesce     time.Duration
+	stateMux             sync.Mutex // guards closed, current, bgConnDone and bgConnCancelCtx
 	rateLimiter          *rate.Limiter
 }
 
@@ -139,10 +151,26 @@ type wsClient struct {
 type WSPreConnectHandler func(ctx context.Context, w WSClient) error
 
 // WSPostConnectHandler will be called after every connect/reconnect. Can send data over ws, but must not block listening for data on the ws.
+// Note: During auto-cycle this is called on the new connection, after the WSPreDisconnectHandler is called on the old one, but before the old connection is closed.
 type WSPostConnectHandler func(ctx context.Context, w WSClient) error
 
-// Creates a new outbound client that can be connected to a remote server
+// WSPreDisconnectHandler is called before a graceful close, to allow cleanup (such as unsubscribe):
+//   - When closed explicitly
+//   - When cycling the connection (after the new connection is established, before post-connect is called)
+type WSPreDisconnectHandler func(ctx context.Context, w WSClient) error
+
+// New creates a new outbound client that can be connected to a remote server.
+// ** Recommend using NewWithConfig directly **
 func New(ctx context.Context, config *WSConfig, beforeConnect WSPreConnectHandler, afterConnect WSPostConnectHandler) (WSClient, error) {
+	conf := *config // copy, so we don't modify the supplied config with the handler overrides
+	conf.PreConnectHandler = beforeConnect
+	conf.PostConnectHandler = afterConnect
+	return NewWithConfig(ctx, &conf)
+}
+
+// NewWithConfig creates a new outbound WebSocket client with configuration,
+// including lifecycle hooks
+func NewWithConfig(ctx context.Context, config *WSConfig) (WSClient, error) {
 	l := log.L(ctx)
 	wsURL, err := buildWSUrl(ctx, config)
 	if err != nil {
@@ -175,12 +203,18 @@ func New(ctx context.Context, config *WSConfig, beforeConnect WSPreConnectHandle
 		headers:              make(http.Header),
 		send:                 make(chan []byte),
 		closing:              make(chan struct{}),
-		beforeConnect:        beforeConnect,
-		afterConnect:         afterConnect,
+		beforeConnect:        config.PreConnectHandler,
+		afterConnect:         config.PostConnectHandler,
+		beforeDisconnect:     config.PreDisconnectHandler,
 		heartbeatInterval:    config.HeartbeatInterval,
+		connCycleInterval:    config.ConnectionCycleInterval,
+		connCycleQuiesce:     config.ConnectionCycleQuiesceTime,
 		useReceiveExt:        config.ReceiveExt,
 		disableReconnect:     config.DisableReconnect,
 		rateLimiter:          ffresty.GetRateLimiter(config.ThrottleRequestsPerSecond, config.ThrottleBurst),
+	}
+	if w.connCycleInterval > 0 && w.disableReconnect {
+		l.Warnf("WS %s connection cycling configured, but inactive as reconnect is disabled", w.url)
 	}
 	w.setupReceiveChannel()
 	for k, v := range config.HTTPHeaders {
@@ -214,7 +248,6 @@ func Wrap(ctx context.Context, config WSWrapConfig, wsconn *websocket.Conn, onCl
 	w := &wsClient{
 		ctx:               ctx,
 		url:               wsconn.LocalAddr().String(),
-		wsconn:            wsconn,
 		disableReconnect:  true,
 		heartbeatInterval: config.HeartbeatInterval,
 		rateLimiter:       ffresty.GetRateLimiter(config.ThrottleRequestsPerSecond, config.ThrottleBurst),
@@ -223,8 +256,9 @@ func Wrap(ctx context.Context, config WSWrapConfig, wsconn *websocket.Conn, onCl
 		closing:           make(chan struct{}),
 	}
 	w.setupReceiveChannel()
-	w.pongReceivedOrReset(false)
-	w.wsconn.SetPongHandler(w.pongHandler)
+	c := w.newConnection(wsconn)
+	close(c.promoted) // sole connection - immediately the consumer of the shared send channel
+	w.current = c
 	log.L(ctx).Infof("WS %s wrapped", w.url)
 	go func() {
 		w.receiveReconnectLoop()
@@ -283,12 +317,25 @@ func (w *wsClient) initialConnect() error {
 }
 
 func (w *wsClient) Close() {
+	// Run the pre-disconnect handler for an orderly close of the current connection, before
+	// we start closing - the same handler that runs on a connection cycle, so pre-close
+	// processing lives in one place. The claim ensures at most one invocation per connection
+	// (a re-entrant or concurrent Close proceeds straight to closing), and any error just
+	// means we fall back to relying on server-side cleanup.
+	if w.beforeDisconnect != nil {
+		if c := w.currentConn(); c != nil && !w.isClosed() && c.claimPreDisconnect() {
+			if err := w.beforeDisconnect(w.ctx, w.boundTo(c)); err != nil {
+				log.L(w.ctx).Warnf("WS %s pre-disconnect handler failed in close: %s", w.url, err)
+			}
+		}
+	}
+
 	c, bgConnDone, bgConnCancelCtx, alreadyClosed := w.markClosed()
 	if alreadyClosed {
 		return
 	}
 	if c != nil {
-		_ = c.Close()
+		c.closeConn()
 	}
 	if bgConnDone != nil {
 		// Cancel the background connect routine and wait for it to exit. Note we must not
@@ -300,7 +347,8 @@ func (w *wsClient) Close() {
 
 // markClosed transitions the client to closed exactly once, returning the resources the
 // caller must then clean up outside of the lock.
-func (w *wsClient) markClosed() (c *websocket.Conn, bgConnDone chan struct{}, bgConnCancelCtx context.CancelFunc, alreadyClosed bool) {
+// Note an old connection mid-quiesce during a cycle is not returned here (handled by cycleConnection)
+func (w *wsClient) markClosed() (c *wsConnection, bgConnDone chan struct{}, bgConnCancelCtx context.CancelFunc, alreadyClosed bool) {
 	w.stateMux.Lock()
 	defer w.stateMux.Unlock()
 
@@ -311,7 +359,7 @@ func (w *wsClient) markClosed() (c *websocket.Conn, bgConnDone chan struct{}, bg
 	close(w.closing)
 
 	// bgConnCancelCtx+bgConnDone are both set as a pair in the stateMux, so if one is non-nil they both are
-	c, bgConnDone, bgConnCancelCtx = w.wsconn, w.bgConnDone, w.bgConnCancelCtx
+	c, bgConnDone, bgConnCancelCtx = w.current, w.bgConnDone, w.bgConnCancelCtx
 	w.bgConnDone = nil
 	return c, bgConnDone, bgConnCancelCtx, false
 }
@@ -323,24 +371,46 @@ func (w *wsClient) isClosed() bool {
 	return w.closed
 }
 
-// called when we've just connected a new underlying websocket.Conn, returning false
+// currentConn gets the current connection under the stateMux
+func (w *wsClient) currentConn() *wsConnection {
+	w.stateMux.Lock()
+	defer w.stateMux.Unlock()
+	return w.current
+}
+
+// called when we've just connected a new underlying connection, returning false
 // if the wsClient was cleaned up in the meantime - meaning the caller has an orphaned
 // connection they need to close.
-func (w *wsClient) setWSConnIfNotClosed(conn *websocket.Conn) bool {
+func (w *wsClient) setCurrentIfNotClosed(c *wsConnection) bool {
 	w.stateMux.Lock()
 	defer w.stateMux.Unlock()
 	if w.closed {
 		return false
 	}
-	w.wsconn = conn
+	w.current = c
 	return true
 }
 
-func (w *wsClient) clearWSConn() {
+func (w *wsClient) clearCurrentIf(c *wsConnection) {
 	w.stateMux.Lock()
 	defer w.stateMux.Unlock()
 
-	w.wsconn = nil
+	if w.current == c {
+		w.current = nil
+	}
+}
+
+// promoteConnection atomically switches the connection from old to newC during a cycle
+func (w *wsClient) promoteConnection(old, newC *wsConnection) bool {
+	w.stateMux.Lock()
+	defer w.stateMux.Unlock()
+	if w.closed {
+		return false
+	}
+	w.current = newC
+	close(old.demoted)
+	close(newC.promoted)
+	return true
 }
 
 func (w *wsClient) Receive() <-chan []byte {
@@ -364,42 +434,81 @@ func (w *wsClient) SetHeader(header, value string) {
 	w.headers.Set(header, value)
 }
 
-func (w *wsClient) Send(ctx context.Context, message []byte) error {
+func (w *wsClient) waitRateLimiter(ctx context.Context) error {
 	if w.rateLimiter != nil {
 		// Wait for permission to proceed with the request
-		err := w.rateLimiter.Wait(ctx)
-		if err != nil {
-			return err
-		}
+		return w.rateLimiter.Wait(ctx)
+	}
+	return nil
+}
+
+func (w *wsClient) Send(ctx context.Context, message []byte) error {
+	if err := w.waitRateLimiter(ctx); err != nil {
+		return err
 	}
 	// Send
+	for {
+		// The sendDone of the current connection guards against blocking forever when that
+		// connection's sender loop has exited - needed because the receiver can actually
+		// call the sender indirectly on reconnect, so if the sender loop fails the
+		// receiver can get blocked
+		var sendDone chan []byte
+		c := w.currentConn()
+		if c != nil {
+			sendDone = c.sendDone
+		}
+		select {
+		case w.send <- message:
+			return nil
+		case <-ctx.Done():
+			return i18n.NewError(ctx, i18n.MsgWSSendTimedOut)
+		case <-sendDone:
+			if w.currentConn() != c {
+				continue // the connection was replaced under us (reconnect/cycle) - retry against the new one
+			}
+			return i18n.NewError(ctx, i18n.MsgWSClosing)
+		case <-w.closing:
+			return i18n.NewError(ctx, i18n.MsgWSClosing)
+		}
+	}
+}
+
+// connBoundClient is the WSClient facade supplied to the connect/disconnect handlers -
+// its Send() is bound to one specific connection (as is promised during a cycle).
+type connBoundClient struct {
+	*wsClient
+	c *wsConnection
+}
+
+func (bc *connBoundClient) Send(ctx context.Context, message []byte) error {
+	if err := bc.waitRateLimiter(ctx); err != nil {
+		return err
+	}
+	bs := &trackedSend{message: message, sent: make(chan bool, 1)}
 	select {
-	case w.send <- message:
-		return nil
+	case bc.c.send <- bs:
+		// Handed off - now wait for the write to complete, so a pre-disconnect handler's
+		// messages are on the wire before the connection is closed behind it
+		select {
+		case ok := <-bs.sent:
+			if !ok {
+				return i18n.NewError(ctx, i18n.MsgWSClosing)
+			}
+			return nil
+		case <-ctx.Done():
+			return i18n.NewError(ctx, i18n.MsgWSSendTimedOut)
+		}
 	case <-ctx.Done():
 		return i18n.NewError(ctx, i18n.MsgWSSendTimedOut)
-	case <-w.sendDone:
-		// Need this case because the receiver can actually call the sender indirectly on reconnect,
-		// so if the sender loop fails the receiver can get blocked
+	case <-bc.c.sendDone:
 		return i18n.NewError(ctx, i18n.MsgWSClosing)
-	case <-w.closing:
+	case <-bc.closing:
 		return i18n.NewError(ctx, i18n.MsgWSClosing)
 	}
 }
 
-func (w *wsClient) heartbeatTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
-	if w.heartbeatInterval > 0 {
-		w.heartbeatMux.Lock()
-		baseTime := w.lastPingCompleted
-		if w.activePingSent != nil {
-			// We're waiting for a pong
-			baseTime = *w.activePingSent
-		}
-		waitTime := w.heartbeatInterval - time.Since(baseTime) // if negative, will pop immediately
-		w.heartbeatMux.Unlock()
-		return context.WithTimeout(ctx, waitTime)
-	}
-	return context.WithCancel(ctx)
+func (w *wsClient) boundTo(c *wsConnection) WSClient {
+	return &connBoundClient{wsClient: w, c: c}
 }
 
 func buildWSUrl(ctx context.Context, config *WSConfig) (string, error) {
@@ -432,6 +541,36 @@ func buildWSUrl(ctx context.Context, config *WSConfig) (string, error) {
 	return u.String(), nil
 }
 
+// dialConnectionAttempt makes a single connect attempt (including the beforeConnect handler).
+// Does not start send/receive loops, or set it as the active connection.
+func (w *wsClient) dialConnectionAttempt(attempt int) (*wsConnection, error) {
+	l := log.L(w.ctx)
+	if w.beforeConnect != nil {
+		if err := w.beforeConnect(w.ctx, w); err != nil {
+			l.Warnf("WS %s connect attempt %d failed in beforeConnect", w.url, attempt)
+			return nil, err
+		}
+	}
+
+	conn, res, err := w.wsdialer.DialContext(w.ctx, w.url, w.headers)
+	if err != nil {
+		errMsg := err.Error()
+		var status = -1
+		if res != nil {
+			b, readErr := io.ReadAll(res.Body)
+			res.Body.Close()
+			if readErr == nil && len(b) > 0 {
+				// The info we need is what the server returned and the status
+				errMsg = string(b)
+			}
+			status = res.StatusCode
+		}
+		l.Warnf("WS %s connect attempt %d failed [%d]: %s", w.url, attempt, status, errMsg)
+		return nil, i18n.WrapError(w.ctx, err, i18n.MsgWSConnectFailed)
+	}
+	return w.newConnection(conn), nil
+}
+
 func (w *wsClient) connect(initial bool) error {
 	l := log.L(w.ctx)
 	l.Debugf("WS %s connecting, isInitial: %t", w.url, initial)
@@ -442,167 +581,19 @@ func (w *wsClient) connect(initial bool) error {
 		}
 		l.Debugf("WS %s connect attempt %d", w.url, attempt)
 		retry = w.backgroundConnect || !initial || attempt < w.initialRetryAttempts
-		if w.beforeConnect != nil {
-			if err = w.beforeConnect(w.ctx, w); err != nil {
-				l.Warnf("WS %s connect attempt %d failed in beforeConnect", w.url, attempt)
-				return retry, err
-			}
-		}
-
-		var res *http.Response
-		var conn *websocket.Conn
-		conn, res, err = w.wsdialer.DialContext(w.ctx, w.url, w.headers)
+		c, err := w.dialConnectionAttempt(attempt)
 		if err != nil {
-			errMsg := err.Error()
-			var status = -1
-			if res != nil {
-				b, readErr := io.ReadAll(res.Body)
-				res.Body.Close()
-				if readErr == nil && len(b) > 0 {
-					// The info we need is what the server returned and the status
-					errMsg = string(b)
-				}
-				status = res.StatusCode
-			}
-			l.Warnf("WS %s connect attempt %d failed [%d]: %s", w.url, attempt, status, errMsg)
-			return retry, i18n.WrapError(w.ctx, err, i18n.MsgWSConnectFailed)
+			return retry, err
 		}
-		if !w.setWSConnIfNotClosed(conn) {
-			_ = conn.Close() // we have to clean up the orphan we just created
+		if !w.setCurrentIfNotClosed(c) {
+			c.closeConn() // we have to clean up the orphan we just created
 			return false, i18n.NewError(w.ctx, i18n.MsgWSClosing)
 		}
 		l.Debugf("WS %s connect attempt %d succeeded", w.url, attempt)
-		w.pongReceivedOrReset(false)
-		conn.SetPongHandler(w.pongHandler)
+		close(c.promoted) // sole connection - immediately the consumer of the shared send channel
 		l.Infof("WS %s connected", w.url)
 		return false, nil
 	})
-}
-
-func (w *wsClient) readLoop() {
-	l := log.L(w.ctx)
-	for {
-		mt, message, err := w.wsconn.ReadMessage()
-		if err != nil {
-			// We treat this as informational, as it's normal for the client to disconnect here
-			l.Infof("WS %s closed: %s", w.url, err)
-			return
-		}
-
-		// Pass the message to the consumer
-		l.Tracef("WS %s read (mt=%d): %s", w.url, mt, message)
-		select {
-		case <-w.sendDone:
-			l.Debugf("WS %s closing reader after send error", w.url)
-			return
-		case w.receive <- message:
-		}
-	}
-}
-
-func (w *wsClient) readLoopExt() {
-	l := log.L(w.ctx)
-	for {
-		// We set a deadline for twice the heartbeat interval - note we bump this on pong
-		if w.heartbeatInterval > 0 {
-			_ = w.wsconn.SetReadDeadline(time.Now().Add(2 * w.heartbeatInterval))
-		}
-
-		mt, r, err := w.wsconn.NextReader()
-		if err != nil {
-			// We treat this as informational, as it's normal for the client to disconnect here
-			l.Infof("WS %s closed: %s", w.url, err)
-			return
-		}
-
-		// Pass the message to the consumer
-		l.Tracef("WS %s read (mt=%d)", w.url, mt)
-		payload := NewWSPayload(mt, r)
-		select {
-		case <-w.sendDone:
-			l.Debugf("WS %s closing reader after send error (waiting for data)", w.url)
-			return
-		case w.receiveExt <- payload:
-		}
-		select {
-		case <-payload.processed:
-			// It's the callers responsibility to ensure they call done on this before we can get the next payload
-		case <-w.sendDone:
-			l.Debugf("WS %s closing reader after send error (waiting for processing of data by client)", w.url)
-			return
-		}
-	}
-}
-
-func (w *wsClient) pongHandler(_ string) error {
-	w.pongReceivedOrReset(true)
-	return nil
-}
-
-func (w *wsClient) pongReceivedOrReset(isPong bool) {
-	w.heartbeatMux.Lock()
-	defer w.heartbeatMux.Unlock()
-
-	if isPong && w.activePingSent != nil {
-		log.L(w.ctx).Debugf("WS %s heartbeat completed (pong) after %.2fms", w.url, float64(time.Since(*w.activePingSent))/float64(time.Millisecond))
-	}
-	w.lastPingCompleted = time.Now() // in new connection case we still want to consider now the time we completed the ping
-	w.activePingSent = nil
-
-	// We set a deadline for twice the heartbeat interval
-	if w.heartbeatInterval > 0 {
-		_ = w.wsconn.SetReadDeadline(time.Now().Add(2 * w.heartbeatInterval))
-	}
-
-}
-
-func (w *wsClient) heartbeatCheck() error {
-	w.heartbeatMux.Lock()
-	defer w.heartbeatMux.Unlock()
-
-	if w.activePingSent != nil {
-		return i18n.NewError(w.ctx, i18n.MsgWSHeartbeatTimeout, float64(time.Since(*w.activePingSent))/float64(time.Millisecond))
-	}
-	log.L(w.ctx).Debugf("WS %s heartbeat timer popped (ping) after %.2fms", w.url, float64(time.Since(w.lastPingCompleted))/float64(time.Millisecond))
-	now := time.Now()
-	w.activePingSent = &now
-	return nil
-}
-
-func (w *wsClient) sendLoop(receiverDone chan struct{}) {
-	l := log.L(w.ctx)
-	defer close(w.sendDone)
-
-	disconnecting := false
-	for !disconnecting {
-		timeoutContext, timeoutCancel := w.heartbeatTimeout(w.ctx)
-
-		select {
-		case message := <-w.send:
-			l.Tracef("WS sending: %s", message)
-			if err := w.wsconn.WriteMessage(websocket.TextMessage, message); err != nil {
-				l.Errorf("WS %s send failed: %s", w.url, err)
-				disconnecting = true
-			}
-		case <-timeoutContext.Done():
-			wsconn := w.wsconn
-			if err := w.heartbeatCheck(); err != nil {
-				l.Errorf("WS %s closing: %s", w.url, err)
-				disconnecting = true
-			} else if wsconn != nil {
-				l.Debugf("WS %s send heartbeat ping", w.url)
-				if err := wsconn.WriteMessage(websocket.PingMessage, []byte{}); err != nil {
-					l.Errorf("WS %s heartbeat send failed: %s", w.url, err)
-					disconnecting = true
-				}
-			}
-		case <-receiverDone:
-			l.Debugf("WS %s send loop exiting", w.url)
-			disconnecting = true
-		}
-
-		timeoutCancel()
-	}
 }
 
 func (w *wsClient) receiveReconnectLoop() {
@@ -612,37 +603,59 @@ func (w *wsClient) receiveReconnectLoop() {
 	} else {
 		defer close(w.receive)
 	}
+
+	// Connection cycling proactively replaces the connection on a regular interval, when
+	// enabled. The timer restarts after the completion of each cycle (the end of the
+	// quiesce period), and after any reconnect due to a connection error.
+	var cycleC <-chan time.Time
+	var cycleTimer *time.Timer
+	cyclingEnabled := w.connCycleInterval > 0 && !w.disableReconnect
+	if cyclingEnabled {
+		cycleTimer = time.NewTimer(w.connCycleInterval)
+		defer cycleTimer.Stop()
+		cycleC = cycleTimer.C
+	}
+	resetCycleTimer := func() {
+		if cyclingEnabled {
+			cycleTimer.Reset(w.connCycleInterval)
+		}
+	}
+
 	for !w.isClosed() {
 		// Start the sender, letting it close without blocking sending a notification on the sendDone
-		w.sendDone = make(chan []byte, 1)
-		receiverDone := make(chan struct{})
-		go w.sendLoop(receiverDone)
+		c := w.currentConn()
+		c.startSender()
 
-		// Call the reconnect processor
+		// Call the reconnect processor, bound to this connection
 		var err error
 		if w.afterConnect != nil {
-			err = w.afterConnect(w.ctx, w)
+			err = w.afterConnect(w.ctx, w.boundTo(c))
 			l.Debugf("WS %s afterConnect (error: %v)", w.url, err)
 		}
 
 		if err == nil {
-			// Synchronously invoke the reader, as it's important we react immediately to any error there.
-			if w.useReceiveExt {
-				w.readLoopExt()
-			} else {
-				w.readLoop()
+			c.startReader()
+		connected:
+			for {
+				select {
+				case <-c.readDone:
+					// The reader exited - a connection error, server close, or Close()
+					w.teardownConnection(c)
+					w.clearCurrentIf(c)
+					l.Debugf("WS %s reset the connection", w.url)
+					break connected
+				case <-cycleC:
+					if newC, ok := w.cycleConnection(c); ok {
+						c = newC // adopt the new connection - its send/read loops are already running
+					}
+					// if !ok the client is closing - the readDone/isClosed checks handle the exit
+					resetCycleTimer()
+				}
 			}
-			close(receiverDone)
-			<-w.sendDone
-
-			// Ensure the connection is closed after the sender and receivers exit
-			err = w.wsconn.Close()
-			if err != nil {
-				l.Warnf("WS %s ignoring websocket connection close error: %v", w.url, err)
-			}
-			l.Debugf("WS %s reset the connection", w.url)
-			w.sendDone = nil
-			w.clearWSConn()
+		} else {
+			// Ensure the connection and its sender are fully cleaned up before we reconnect
+			w.teardownConnection(c)
+			w.clearCurrentIf(c)
 		}
 
 		if w.disableReconnect {
@@ -657,6 +670,75 @@ func (w *wsClient) receiveReconnectLoop() {
 				l.Errorf("WS %s exiting due to connect error: %v", w.url, err)
 				return
 			}
+			resetCycleTimer()
 		}
 	}
+}
+
+// cycleConnection runs on the receiveReconnectLoop goroutine when a cycle is due.
+// It does not return until either the old connection is fully torn down, or the client is
+// closing. This ensures we never have more than two connections.
+func (w *wsClient) cycleConnection(old *wsConnection) (*wsConnection, bool) {
+	l := log.L(w.ctx)
+	l.Debugf("WS %s connection cycle starting", w.url)
+
+	// Establish the new connection - with infinite retry (like reconnect), keeping the
+	// old connection fully active (sending, receiving and heartbeating) throughout.
+	var newC *wsConnection
+	err := w.connRetry.DoCustomLog(w.ctx, func(attempt int) (retry bool, err error) {
+		if w.isClosed() {
+			return false, i18n.NewError(w.ctx, i18n.MsgWSClosing)
+		}
+		c, err := w.dialConnectionAttempt(attempt)
+		if err != nil {
+			return true, err // the old connection remains active while we retry
+		}
+		c.startSender() // services connection-bound sends from the hooks (not yet promoted)
+
+		// The pre-disconnect handler gets to run on cycle, as well as close.
+		// This happens before the quiesce cycle, so things like subscriptions are only active
+		// on a single connection. In-flight request/reply exchanges can continue on the old connection.
+		if w.beforeDisconnect != nil && old.claimPreDisconnect() {
+			if pdErr := w.beforeDisconnect(w.ctx, w.boundTo(old)); pdErr != nil {
+				l.Warnf("WS %s pre-disconnect handler failed (continuing connection cycle): %s", w.url, pdErr)
+			}
+		}
+
+		// Call the connect processor against the new connection
+		if w.afterConnect != nil {
+			if acErr := w.afterConnect(w.ctx, w.boundTo(c)); acErr != nil {
+				l.Warnf("WS %s connection cycle attempt %d failed in afterConnect: %s", w.url, attempt, acErr)
+				w.teardownConnection(c)
+				return true, acErr
+			}
+		}
+		newC = c
+		return false, nil
+	})
+	if err != nil {
+		// Only reachable when the client is closing / the context is cancelled
+		return nil, false
+	}
+
+	// Start reading, and atomically switch all new sends over to the new connection
+	newC.startReader()
+	if !w.promoteConnection(old, newC) {
+		// The client was closed while we were cycling - clean up the orphaned new connection
+		w.teardownConnection(newC)
+		return nil, false
+	}
+
+	// Quiesce period - the old connection continues to deliver any in-flight inbound
+	// messages to the receive channel, before we close it.
+	old.setQuiesceDeadline(w.connCycleQuiesce)
+	l.Infof("WS %s connection cycled, quiescing old connection for %s", w.url, w.connCycleQuiesce)
+	quiesce := time.NewTimer(w.connCycleQuiesce)
+	defer quiesce.Stop()
+	select {
+	case <-quiesce.C:
+	case <-old.readDone: // the old connection failed during quiesce - just close it early
+	case <-w.closing: // Close() handles the current (new) connection - we clean up the old one below
+	}
+	w.teardownConnection(old)
+	return newC, true
 }
