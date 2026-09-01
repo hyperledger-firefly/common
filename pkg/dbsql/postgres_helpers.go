@@ -1,4 +1,4 @@
-// Copyright © 2024 Kaleido, Inc.
+// Copyright © 2026 Kaleido, Inc.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -20,6 +20,7 @@ import (
 	"context"
 	"database/sql/driver"
 	"fmt"
+	"net/url"
 	"strings"
 
 	sq "github.com/Masterminds/squirrel"
@@ -43,4 +44,24 @@ func BuildPostgreSQLOptimizedUpsert(ctx context.Context, table string, idColumn 
 		return insert, i18n.NewError(ctx, i18n.MsgDBErrorBuildingStatement, err)
 	}
 	return insert.Suffix(fmt.Sprintf("ON CONFLICT (%s) DO UPDATE", idColumn)).SuffixExpr(sq.Expr(updateSQL, updateValues...)).Suffix("RETURNING " + returnCol), nil
+}
+
+// GetPostgreSQLDatabaseName extracts the database name from a PostgreSQL connection URI
+// (e.g. postgres://user:pass@host:port/dbname?params). Returns an error if the URL
+// has no scheme or no explicit database name in the path.
+//
+// libpq defaults dbname to the connecting OS username when omitted, but this function
+// has no way to determine that, so it requires an explicit dbname in the URL.
+func GetPostgreSQLDatabaseName(pgURL string) (string, error) {
+
+	parsed, err := url.Parse(pgURL)
+	if err != nil || parsed.Scheme == "" {
+		return "", i18n.NewError(context.Background(), i18n.MsgDBFailedToExtractDBName)
+	}
+
+	dbName := strings.TrimPrefix(parsed.Path, "/")
+	if dbName == "" {
+		return "", i18n.NewError(context.Background(), i18n.MsgDBFailedToExtractDBName)
+	}
+	return dbName, nil
 }

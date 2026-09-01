@@ -1,4 +1,4 @@
-// Copyright © 2025 Kaleido, Inc.
+// Copyright © 2026 Kaleido, Inc.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -71,6 +71,9 @@ type Provider interface {
 
 	// ApplyInsertQueryCustomizations updates the INSERT query for returning the Sequence, and returns whether it needs to be run as a query to return the Sequence field
 	ApplyInsertQueryCustomizations(insert sq.InsertBuilder, requestConflictEmptyResult bool) (updatedInsert sq.InsertBuilder, runAsQuery bool)
+
+	// GetDatabaseName returns the name of the database from the URL
+	GetDatabaseName(url string) (string, error)
 }
 
 // Implementing this interface allows cleanup of the connection used during migration

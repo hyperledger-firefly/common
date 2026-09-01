@@ -30,8 +30,10 @@ import (
 	"github.com/go-resty/resty/v2"
 	"github.com/hyperledger-firefly/common/pkg/config"
 	"github.com/hyperledger-firefly/common/pkg/httpserver"
+	"github.com/hyperledger-firefly/common/pkg/log"
 	"github.com/hyperledger-firefly/common/pkg/metric"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // utManager simulate the type you'd pass through your request interface
@@ -805,4 +807,51 @@ func TestVersionedAPIInitErrors(t *testing.T) {
 	assert.Error(t, err)
 	assert.Regexp(t, "FF00255", err)
 
+}
+
+func TestMonitorServerChangeLogLevel(t *testing.T) {
+	_, as, done := newTestAPIServer(t, true)
+	defer done()
+
+	<-as.started
+
+	logLevels := []string{"error", "warning" /* warn also works but logrus converts to warning so we test that for simplicity */, "debug", "trace"}
+	prevLevel := "info"
+	for _, newLevel := range logLevels {
+		require.Equal(t, prevLevel, log.GetLevel())
+		res, err := resty.New().R().
+			Put(fmt.Sprintf("%s/logging?level=%s", as.MonitoringPublicURL(), newLevel))
+		require.NoError(t, err)
+		assert.NotEmpty(t, res.Body())
+		assert.Equal(t, newLevel, log.GetLevel())
+		changes := &loggingChanges{}
+		err = json.Unmarshal(res.Body(), changes)
+		require.NoError(t, err)
+		assert.Equal(t, prevLevel, changes.Level.Previous)
+		assert.Equal(t, newLevel, changes.Level.New)
+		prevLevel = newLevel
+	}
+
+	res, err := resty.New().R().
+		Put(fmt.Sprintf("%s/logging?level=unsupported", as.MonitoringPublicURL()))
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, res.StatusCode())
+	assert.Contains(t, string(res.Body()), "FF00257")
+}
+
+func TestMonitoringServerMetrics(t *testing.T) {
+	_, as, done := newTestAPIServer(t, true)
+	defer done()
+
+	<-as.Started()
+
+	res, err := resty.New().R().
+		Get(fmt.Sprintf("%s/metrics", as.MonitoringPublicURL()))
+	require.NoError(t, err)
+	assert.NotEmpty(t, res.Body())
+	metrics := string(res.Body())
+	assert.Contains(t, metrics, "HELP")                                   // help text from standard openmetrics endpoint
+	assert.Contains(t, metrics, "go_build_info")                          // build info
+	assert.Contains(t, metrics, "go_gc_duration_seconds")                 // go
+	assert.Contains(t, metrics, "promhttp_metric_handler_requests_total") // http for prom
 }

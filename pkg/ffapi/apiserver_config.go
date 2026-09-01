@@ -26,14 +26,13 @@ var (
 	ConfMonitoringServerMetricsPath  = "metricsPath"
 	ConfMonitoringServerLivenessPath = "livenessPath"
 	ConfMonitoringServerLoggingPath  = "loggingPath"
-
-	ConfAPIDefaultFilterLimit     = "defaultFilterLimit"
-	ConfAPIMaxFilterLimit         = "maxFilterLimit"
-	ConfAPIMaxFilterSkip          = "maxFilterSkip"
-	ConfAPIRequestTimeout         = "requestTimeout"
-	ConfAPIRequestMaxTimeout      = "requestMaxTimeout"
-	ConfAPIAlwaysPaginate         = "alwaysPaginate"
-	ConfAPIDynamicPublicURLHeader = "dynamicPublicURLHeader"
+	ConfAPIDefaultFilterLimit        = "defaultFilterLimit"
+	ConfAPIMaxFilterLimit            = "maxFilterLimit"
+	ConfAPIMaxFilterSkip             = "maxFilterSkip"
+	ConfAPIRequestTimeout            = "requestTimeout"
+	ConfAPIRequestMaxTimeout         = "requestMaxTimeout"
+	ConfAPIAlwaysPaginate            = "alwaysPaginate"
+	ConfAPIDynamicPublicURLHeader    = "dynamicPublicURLHeader"
 )
 
 func InitAPIServerConfig(apiConfig, monitoringConfig, corsConfig config.Section) {

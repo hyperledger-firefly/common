@@ -113,6 +113,7 @@ func NewPrometheusMetricsRegistryWithOptions(componentName string /*component na
 	// register default cpu & go metrics by default
 	registerer.MustRegister(collectors.NewGoCollector())
 	registerer.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
+	registerer.MustRegister(collectors.NewBuildInfoCollector())
 
 	metricsPrefix := ffMetricsPrefix
 	if opts.MetricsPrefix != "" {

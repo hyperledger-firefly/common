@@ -1,4 +1,4 @@
-// Copyright © 2024 Kaleido, Inc.
+// Copyright © 2026 Kaleido, Inc.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -29,6 +29,7 @@ import (
 	"github.com/hyperledger-firefly/common/pkg/fftypes"
 	"github.com/hyperledger-firefly/common/pkg/i18n"
 	"github.com/hyperledger-firefly/common/pkg/log"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 
 	"github.com/golang-migrate/migrate/v4/database"
 	// Import migrate file source
@@ -43,6 +44,7 @@ type Database struct {
 	features       SQLFeatures
 	connLimit      int
 	sequenceColumn string
+	dbName         string
 }
 
 // PreCommitAccumulator is a structure that can accumulate state during
@@ -57,6 +59,7 @@ type TXWrapper struct {
 	sqlTX                *sql.Tx
 	preCommitAccumulator PreCommitAccumulator
 	postCommit           []func()
+	startTime            time.Time
 }
 
 func (tx *TXWrapper) AddPostCommitHook(fn func()) {
@@ -84,6 +87,12 @@ func (s *Database) Init(ctx context.Context, provider Provider, config config.Se
 		return i18n.NewError(ctx, i18n.MsgMissingConfig, "url", fmt.Sprintf("database.%s", s.provider.Name()))
 	}
 
+	dbName, err := provider.GetDatabaseName(config.GetString(SQLConfDatasourceURL))
+	if err != nil {
+		return i18n.WrapError(ctx, err, i18n.MsgDBInitFailed)
+	}
+	s.dbName = dbName
+
 	if s.db, err = provider.Open(config.GetString(SQLConfDatasourceURL)); err != nil {
 		return i18n.WrapError(ctx, err, i18n.MsgDBInitFailed)
 	}
@@ -104,6 +113,10 @@ func (s *Database) Init(ctx context.Context, provider Provider, config config.Se
 		if err = s.applyDBMigrations(ctx, config, provider); err != nil {
 			return i18n.WrapError(ctx, err, i18n.MsgDBMigrationFailed)
 		}
+	}
+
+	if metricsRegistry != nil { // we have enabled metrics globally, so register the database stats collector for this database
+		metricsRegistry.MustRegisterCollector(collectors.NewDBStatsCollector(s.db, s.dbName))
 	}
 
 	return nil
@@ -141,6 +154,7 @@ func (s *Database) RunAsGroup(ctx context.Context, fn func(ctx context.Context) 
 }
 
 func (s *Database) applyDBMigrations(ctx context.Context, config config.Section, provider Provider) (err error) {
+	before := time.Now()
 	var driver database.Driver
 	providerClosable, isClosable := provider.(ProviderCloseableMigrationDriver)
 	if isClosable {
@@ -167,6 +181,7 @@ func (s *Database) applyDBMigrations(ctx context.Context, config config.Section,
 	if err != nil && err != migrate.ErrNoChange {
 		return i18n.WrapError(ctx, err, i18n.MsgDBMigrationFailed)
 	}
+	s.observeMigration(ctx, time.Since(before))
 	return nil
 }
 
@@ -182,7 +197,6 @@ func GetTXFromContext(ctx context.Context) *TXWrapper {
 }
 
 func (s *Database) BeginOrUseTx(ctx context.Context) (ctx1 context.Context, tx *TXWrapper, autoCommit bool, err error) {
-
 	tx = GetTXFromContext(ctx)
 	if tx != nil {
 		// There is s transaction on the context already.
@@ -199,7 +213,8 @@ func (s *Database) BeginOrUseTx(ctx context.Context) (ctx1 context.Context, tx *
 		return ctx1, nil, false, i18n.WrapError(ctx1, err, i18n.MsgDBBeginFailed)
 	}
 	tx = &TXWrapper{
-		sqlTX: sqlTX,
+		sqlTX:     sqlTX,
+		startTime: before,
 	}
 	ctx1 = context.WithValue(ctx1, txContextKey{}, tx)
 	l.Debugf("SQL<- begin (%.2fms)", floatMillisSince(before))
@@ -231,10 +246,13 @@ func (s *Database) RunAsQueryTx(ctx context.Context, table string, tx *TXWrapper
 	} else {
 		rows, err = s.db.QueryContext(ctx, sqlQuery, args...)
 	}
+	elapsed := time.Since(before)
 	if err != nil {
 		l.Errorf(`SQL query failed: %s sql=[ %s ]`, err, sqlQuery)
+		s.incOpError(ctx, table, "query")
 		return nil, tx, i18n.WrapError(ctx, err, i18n.MsgDBQueryFailed)
 	}
+	s.observeOp(ctx, table, "query", elapsed)
 	l.Debugf(`SQL<- query %s (%.2fms)`, table, floatMillisSince(before))
 	return rows, tx, nil
 }
@@ -272,16 +290,20 @@ func (s *Database) CountQuery(ctx context.Context, table string, tx *TXWrapper, 
 	} else {
 		rows, err = s.db.QueryContext(ctx, sqlQuery, args...)
 	}
+	elapsed := time.Since(before)
 	if err != nil {
 		l.Errorf(`SQL count query failed: %s sql=[ %s ]`, err, sqlQuery)
+		s.incOpError(ctx, table, "count")
 		return count, i18n.WrapError(ctx, err, i18n.MsgDBQueryFailed)
 	}
 	defer rows.Close()
 	if rows.Next() {
 		if err = rows.Scan(&count); err != nil {
+			s.incOpError(ctx, table, "count")
 			return count, i18n.WrapError(ctx, err, i18n.MsgDBReadErr, table)
 		}
 	}
+	s.observeOp(ctx, table, "count", elapsed)
 	l.Debugf(`SQL<- count query %s: %d (%.2fms)`, table, count, floatMillisSince(before))
 	return count, nil
 }
@@ -337,6 +359,7 @@ func (s *Database) InsertTxRows(ctx context.Context, table string, tx *TXWrapper
 			if requestConflictEmptyResult && noInsert {
 				l.Infof(`SQL insert returning partial result: %s`, err)
 			} else {
+				s.incOpError(ctx, table, "insert")
 				l.Errorf(`SQL insert failed (conflictEmptyRequested=%t) sql=[ %s ]: %s`, requestConflictEmptyResult, sqlQuery, err)
 			}
 			return i18n.WrapError(ctx, err, i18n.MsgDBInsertFailed)
@@ -347,11 +370,13 @@ func (s *Database) InsertTxRows(ctx context.Context, table string, tx *TXWrapper
 		}
 		res, err := tx.sqlTX.ExecContext(ctx, sqlQuery, args...)
 		if err != nil {
+			s.incOpError(ctx, table, "insert")
 			l.Errorf(`SQL insert failed: %s sql=[ %s ]: %s`, err, sqlQuery, err)
 			return i18n.WrapError(ctx, err, i18n.MsgDBInsertFailed)
 		}
 		sequences[0], _ = res.LastInsertId()
 	}
+	s.observeOp(ctx, table, "insert", time.Since(before))
 	l.Debugf(`SQL<- insert %s sequences=%v (%.2fms)`, table, sequences, floatMillisSince(before))
 
 	if postCommit != nil {
@@ -370,9 +395,11 @@ func (s *Database) DeleteTx(ctx context.Context, table string, tx *TXWrapper, q 
 	l.Tracef(`SQL-> delete query: %s args: %+v`, sqlQuery, args)
 	res, err := tx.sqlTX.ExecContext(ctx, sqlQuery, args...)
 	if err != nil {
+		s.incOpError(ctx, table, "delete")
 		l.Errorf(`SQL delete failed: %s sql=[ %s ]: %s`, err, sqlQuery, err)
 		return i18n.WrapError(ctx, err, i18n.MsgDBDeleteFailed)
 	}
+	s.observeOp(ctx, table, "delete", time.Since(before))
 	ra, _ := res.RowsAffected()
 	l.Debugf(`SQL<- delete %s affected=%d (%.2fms)`, table, ra, floatMillisSince(before))
 	if ra < 1 {
@@ -391,9 +418,11 @@ func (s *Database) ExecTx(ctx context.Context, table string, tx *TXWrapper, sqlQ
 	l.Tracef(`SQL-> exec: %s args: %+v`, sqlQuery, args)
 	res, err := tx.sqlTX.ExecContext(ctx, sqlQuery, args...)
 	if err != nil {
+		s.incOpError(ctx, table, "exec")
 		l.Errorf(`SQL exec: %s sql=[ %s ]: %s`, err, sqlQuery, err)
 		return nil, i18n.WrapError(ctx, err, i18n.MsgDBExecFailed)
 	}
+	s.observeOp(ctx, table, "exec", time.Since(before))
 	ra, _ := res.RowsAffected()
 	l.Debugf(`SQL<- exec: %s affected=%d (%.2fms)`, table, ra, floatMillisSince(before))
 	return res, nil
@@ -409,9 +438,11 @@ func (s *Database) UpdateTx(ctx context.Context, table string, tx *TXWrapper, q 
 	l.Tracef(`SQL-> update query: %s (args: %+v)`, sqlQuery, args)
 	res, err := tx.sqlTX.ExecContext(ctx, sqlQuery, args...)
 	if err != nil {
+		s.incOpError(ctx, table, "update")
 		l.Errorf(`SQL update failed: %s sql=[ %s ]`, err, sqlQuery)
 		return -1, i18n.WrapError(ctx, err, i18n.MsgDBUpdateFailed)
 	}
+	s.observeOp(ctx, table, "update", time.Since(before))
 	ra, _ := res.RowsAffected()
 	l.Debugf(`SQL<- update %s affected=%d (%.2fms)`, table, ra, floatMillisSince(before))
 
@@ -447,9 +478,9 @@ func (s *Database) RollbackTx(ctx context.Context, tx *TXWrapper, autoCommit boo
 
 	err := tx.sqlTX.Rollback()
 	if err == nil {
+		s.observeTx(ctx, time.Since(tx.startTime), "rollback")
 		log.L(ctx).Warnf("SQL! transaction rollback")
-	}
-	if err != nil && err != sql.ErrTxDone {
+	} else if err != sql.ErrTxDone {
 		log.L(ctx).Errorf(`SQL rollback failed: %s`, err)
 	}
 }
@@ -471,14 +502,15 @@ func (s *Database) CommitTx(ctx context.Context, tx *TXWrapper, autoCommit bool)
 		}
 	}
 
-	before := time.Now()
+	commitBefore := time.Now()
 	l.Tracef(`SQL-> commit`)
 	err := tx.sqlTX.Commit()
 	if err != nil {
 		l.Errorf(`SQL commit failed: %s`, err)
 		return i18n.WrapError(ctx, err, i18n.MsgDBCommitFailed)
 	}
-	l.Debugf(`SQL<- commit (%.2fms)`, floatMillisSince(before))
+	s.observeTx(ctx, time.Since(tx.startTime), "commit")
+	l.Debugf(`SQL<- commit (%.2fms)`, floatMillisSince(commitBefore))
 
 	// Emit any post commit events (these aren't currently allowed to cause errors)
 	for i, pce := range tx.postCommit {

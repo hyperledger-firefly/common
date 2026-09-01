@@ -196,4 +196,5 @@ var (
 	MsgFFExtensionsInvalidEncoding                 = ffe("FF00259", "Invalid extension key '%s' - extension keys must follow the format 'x-<name>'", http.StatusBadRequest)
 	MsgInvalidCIDR                                 = ffe("FF00260", "Invalid CIDR '%s' in denylist configuration", http.StatusBadRequest)
 	MsgConnectionToCIDRBlocked                     = ffe("FF00261", "Connection to '%s' blocked by CIDR denylist (%s)", http.StatusForbidden)
+	MsgDBFailedToExtractDBName                     = ffe("FF00262", "Failed to extract database name from PostgreSQL URL")
 )
