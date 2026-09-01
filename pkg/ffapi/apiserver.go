@@ -1,4 +1,4 @@
-// Copyright © 2026 Kaleido, Inc.
+// Copyright © 2025 Kaleido, Inc.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -18,7 +18,6 @@ package ffapi
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -124,16 +123,15 @@ func NewAPIServer[T any](ctx context.Context, options APIServerOptions[T]) APISe
 	}
 
 	as := &apiServer[T]{
-		defaultFilterLimit: options.APIConfig.GetUint64(ConfAPIDefaultFilterLimit),
-		maxFilterLimit:     options.APIConfig.GetUint64(ConfAPIMaxFilterLimit),
-		maxFilterSkip:      options.APIConfig.GetUint64(ConfAPIMaxFilterSkip),
-		requestTimeout:     options.APIConfig.GetDuration(ConfAPIRequestTimeout),
-		requestMaxTimeout:  options.APIConfig.GetDuration(ConfAPIRequestMaxTimeout),
-		monitoringEnabled:  options.MonitoringConfig.GetBool(ConfMonitoringServerEnabled),
-		metricsPath:        options.MonitoringConfig.GetString(ConfMonitoringServerMetricsPath),
-		livenessPath:       options.MonitoringConfig.GetString(ConfMonitoringServerLivenessPath),
-		loggingPath:        options.MonitoringConfig.GetString(ConfMonitoringServerLoggingPath),
-
+		defaultFilterLimit:        options.APIConfig.GetUint64(ConfAPIDefaultFilterLimit),
+		maxFilterLimit:            options.APIConfig.GetUint64(ConfAPIMaxFilterLimit),
+		maxFilterSkip:             options.APIConfig.GetUint64(ConfAPIMaxFilterSkip),
+		requestTimeout:            options.APIConfig.GetDuration(ConfAPIRequestTimeout),
+		requestMaxTimeout:         options.APIConfig.GetDuration(ConfAPIRequestMaxTimeout),
+		monitoringEnabled:         options.MonitoringConfig.GetBool(ConfMonitoringServerEnabled),
+		metricsPath:               options.MonitoringConfig.GetString(ConfMonitoringServerMetricsPath),
+		livenessPath:              options.MonitoringConfig.GetString(ConfMonitoringServerLivenessPath),
+		loggingPath:               options.MonitoringConfig.GetString(ConfMonitoringServerLoggingPath),
 		alwaysPaginate:            options.APIConfig.GetBool(ConfAPIAlwaysPaginate),
 		handleYAML:                options.HandleYAML,
 		apiDynamicPublicURLHeader: options.APIConfig.GetString(ConfAPIDynamicPublicURLHeader),
@@ -411,25 +409,12 @@ func (as *apiServer[T]) noContentResponder(res http.ResponseWriter, _ *http.Requ
 	res.WriteHeader(http.StatusNoContent)
 }
 
-type loggingChanges struct {
-	Level *logSettingChange `json:"level,omitempty"`
-}
-
-type logSettingChange struct {
-	Previous any `json:"previous,omitempty"`
-	New      any `json:"new"`
-}
-
-func LoggingSettingsHandler(res http.ResponseWriter, req *http.Request) (status int, err error) {
+func (as *apiServer[T]) loggingSettingsHandler(_ http.ResponseWriter, req *http.Request) (status int, err error) {
 	if req.Method != http.MethodPut {
 		return http.StatusMethodNotAllowed, i18n.NewError(req.Context(), i18n.MsgMethodNotAllowed)
 	}
-
-	changes := &loggingChanges{}
-
 	logLevel := req.URL.Query().Get("level")
 	if logLevel != "" {
-		currentLogLevel := log.GetLevel()
 		l := log.L(log.WithLogFieldsMap(req.Context(), map[string]string{"new_level": logLevel}))
 		switch strings.ToLower(logLevel) {
 		case "error":
@@ -437,26 +422,16 @@ func LoggingSettingsHandler(res http.ResponseWriter, req *http.Request) (status 
 		case "trace":
 		case "info":
 		case "warn":
-		case "warning":
 			// noop - all valid levels
 		default:
 			l.Warn("invalid log level")
 			return http.StatusBadRequest, i18n.NewError(req.Context(), i18n.MsgInvalidLogLevel, logLevel)
 		}
-		l.Warn("changing log level")
+		l.Warn("changing log level", logLevel)
 		log.SetLevel(logLevel)
-		changes.Level = &logSettingChange{
-			Previous: currentLogLevel,
-			New:      logLevel,
-		}
 	}
 
-	res.Header().Add("Content-Type", "application/json")
-	changesJSON, _ := json.Marshal(changes)
-	_, err = res.Write(changesJSON)
-	if err != nil {
-		return http.StatusInternalServerError, err
-	}
+	// TODO allow for toggling formatting (json, text), sampling, etc.
 
 	return http.StatusAccepted, nil
 }
@@ -471,7 +446,7 @@ func (as *apiServer[T]) createMonitoringMuxRouter(ctx context.Context) (*mux.Rou
 		panic(err)
 	}
 	r.Path(as.metricsPath).Handler(h)
-	r.Path(as.loggingPath).Handler(hf.APIWrapper(LoggingSettingsHandler))
+	r.Path(as.loggingPath).Handler(hf.APIWrapper(as.loggingSettingsHandler))
 	r.HandleFunc(as.livenessPath, as.noContentResponder)
 
 	for _, route := range as.MonitoringRoutes {

@@ -1,4 +1,4 @@
-// Copyright © 2026 Kaleido, Inc.
+// Copyright © 2024 Kaleido, Inc.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -19,8 +19,6 @@ package dbsql
 import (
 	"context"
 	"database/sql"
-	"path/filepath"
-	"strings"
 
 	sq "github.com/Masterminds/squirrel"
 	migratedb "github.com/golang-migrate/migrate/v4/database"
@@ -76,19 +74,4 @@ func (p *sqLiteProvider) Open(url string) (*sql.DB, error) {
 
 func (p *sqLiteProvider) GetMigrationDriver(db *sql.DB) (migratedb.Driver, error) {
 	return sqlite3.WithInstance(db, &sqlite3.Config{})
-}
-
-func (p *sqLiteProvider) GetDatabaseName(dsn string) (string, error) {
-	// Strip file: URI prefix if present
-	name := strings.TrimPrefix(dsn, "file:")
-	// Strip query parameters (?_journal=WAL, ?mode=ro, etc.)
-	if qIdx := strings.Index(name, "?"); qIdx >= 0 {
-		name = name[:qIdx]
-	}
-	// Special names pass through as-is
-	if name == ":memory:" || name == "" {
-		return "sqlite", nil
-	}
-	// Use the base filename without extension as the database name
-	return strings.TrimSuffix(filepath.Base(name), filepath.Ext(name)), nil
 }

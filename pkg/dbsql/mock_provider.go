@@ -1,4 +1,4 @@
-// Copyright © 2026 Kaleido, Inc.
+// Copyright © 2024 Kaleido, Inc.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -47,7 +47,6 @@ type MockProviderConnScoped struct {
 type MockProviderConfig struct {
 	FakePSQLInsert             bool
 	OpenError                  error
-	GetDatabaseNameError       error
 	GetMigrationDriverError    error
 	IndividualSort             bool
 	MultiRowInsert             bool
@@ -118,8 +117,4 @@ func (mp *MockProvider) GetMigrationDriver(_ *sql.DB) (migratedb.Driver, error) 
 
 func (mp *MockProviderConnScoped) GetMigrationDriverConn(_ *sql.DB) (migratedb.Driver, error) {
 	return mp.mmg, mp.GetMigrationDriverError
-}
-
-func (mp *MockProvider) GetDatabaseName(_ string) (string, error) {
-	return "mockdb", mp.GetDatabaseNameError
 }

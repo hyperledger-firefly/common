@@ -102,19 +102,16 @@ type HTTPConfig struct {
 
 func EnableClientMetrics(ctx context.Context, metricsRegistry metric.MetricsRegistry) error {
 	// create a metrics manager (if not already set)
-	if metricsManager != nil {
-		log.L(ctx).Warn("resty metrics are already enabled, skipping")
-		return nil
+	if metricsManager == nil {
+		mm, err := metricsRegistry.NewMetricsManagerForSubsystem(ctx, "resty")
+		metricsManager = mm
+		if err != nil {
+			return err
+		}
+		metricsManager.NewCounterMetricWithLabels(ctx, metricsHTTPResponsesTotal, "HTTP response", []string{"status", "error", "host", "method"}, false)
+		metricsManager.NewCounterMetricWithLabels(ctx, metricsNetworkErrorsTotal, "Network error", []string{"host", "method"}, false)
+		metricsManager.NewSummaryMetricWithLabels(ctx, metricsHTTPResponseTime, "HTTP response time", []string{"status", "host", "method"}, false)
 	}
-
-	mm, err := metricsRegistry.NewMetricsManagerForSubsystem(ctx, "resty")
-	if err != nil {
-		return err
-	}
-	metricsManager = mm
-	metricsManager.NewCounterMetricWithLabels(ctx, metricsHTTPResponsesTotal, "HTTP response", []string{"status", "error", "host", "method"}, false)
-	metricsManager.NewCounterMetricWithLabels(ctx, metricsNetworkErrorsTotal, "Network error", []string{"host", "method"}, false)
-	metricsManager.NewSummaryMetricWithLabels(ctx, metricsHTTPResponseTime, "HTTP response time", []string{"status", "host", "method"}, false)
 
 	// create hooks
 	onErrorMetricsHook := func(req *resty.Request, _ error) {

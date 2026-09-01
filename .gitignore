@@ -7,4 +7,3 @@ __debug*
 .vscode/*.log
 *.iml
 .idea/
-bin/
