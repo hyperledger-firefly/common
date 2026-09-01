@@ -145,6 +145,9 @@ func NewAPIServer[T any](ctx context.Context, options APIServerOptions[T]) APISe
 			SupportFieldRedaction:      options.SupportFieldRedaction,
 			ExportComponentOpts:        options.SwaggerExportComponentOpts,
 			AdditionalSchemaCustomizer: options.SwaggerAdditionalSchemaCustomizer,
+			APIDefaultFilterLimit:      options.APIConfig.GetString(ConfAPIDefaultFilterLimit),
+			APIMaxFilterLimit:          options.APIConfig.GetUint(ConfAPIMaxFilterLimit),
+			APIMaxFilterSkip:           options.APIConfig.GetUint(ConfAPIMaxFilterSkip),
 		},
 	}
 	if as.FavIcon16 == nil {
