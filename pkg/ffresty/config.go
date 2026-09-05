@@ -32,7 +32,7 @@ const (
 	defaultRetryWaitTime                 = "250ms"
 	defaultRetryMaxWaitTime              = "30s"
 	defaultRequestTimeout                = "30s"
-	defaultHTTPIdleTimeout               = "475ms" // Node.js default keepAliveTimeout is 5 seconds, so we have to set a base below this
+	defaultHTTPIdleTimeout               = "4750ms" // Node.js default keepAliveTimeout is 5 seconds, so we have to set a base below this (was a 475ms typo for years)
 	defaultHTTPMaxIdleConns              = 100     // match Go's default
 	defaultHTTPMaxConnsPerHost           = 0       // unlimited
 	defaultHTTPMaxIdleConnsPerHost       = 100     // avoid Go's conservative default of 2, we'd rather it be the same as the maxIdleConns so a single host can use all the connections

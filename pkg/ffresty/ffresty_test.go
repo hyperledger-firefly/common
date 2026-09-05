@@ -863,3 +863,22 @@ func TestGenerateConfigDNSResolver(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Nil(t, cfg.Resolver)
 }
+
+func TestNewTransportPoolSettingsFromConfig(t *testing.T) {
+	// The idle pool is sized from maxIdleConnsPerHost, independently of the (unlimited by
+	// default) maxConnsPerHost - a zero MaxIdleConnsPerHost would silently fall back to Go's
+	// default of 2 idle connections per host.
+	resetConf()
+	utConf.Set(HTTPConfigURL, "http://localhost:12345")
+	utConf.Set(HTTPMaxConnsPerHost, 0)
+	utConf.Set(HTTPMaxIdleConnsPerHost, 42)
+	utConf.Set(HTTPMaxIdleConns, 84)
+	c, err := New(context.Background(), utConf)
+	require.NoError(t, err)
+	transport, ok := c.GetClient().Transport.(*http.Transport)
+	require.True(t, ok)
+	assert.Equal(t, 0, transport.MaxConnsPerHost)
+	assert.Equal(t, 42, transport.MaxIdleConnsPerHost)
+	assert.Equal(t, 84, transport.MaxIdleConns)
+	assert.True(t, transport.ForceAttemptHTTP2)
+}
