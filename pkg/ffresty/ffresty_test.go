@@ -866,8 +866,7 @@ func TestGenerateConfigDNSResolver(t *testing.T) {
 
 func TestNewTransportPoolSettingsFromConfig(t *testing.T) {
 	// The idle pool is sized from maxIdleConnsPerHost, independently of the (unlimited by
-	// default) maxConnsPerHost - a zero MaxIdleConnsPerHost would silently fall back to Go's
-	// default of 2 idle connections per host.
+	// default) maxConnsPerHost
 	resetConf()
 	utConf.Set(HTTPConfigURL, "http://localhost:12345")
 	utConf.Set(HTTPMaxConnsPerHost, 0)
