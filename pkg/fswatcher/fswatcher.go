@@ -48,11 +48,15 @@ func Reconcile(ctx context.Context, fullFilePath string, onChange, onClose, onSy
 func sync(ctx context.Context, fullFilePath string, onChange, onClose, onSync func(), resyncInterval *time.Duration) error {
 	filePath := path.Dir(fullFilePath)
 	fileName := path.Base(fullFilePath)
-	log.L(ctx).Debugf("Starting file reconciler for '%s' in directory '%s'", fileName, filePath)
+	logCtx := log.WithLogFieldsMap(ctx, map[string]string{
+		"file": fileName,
+		"dir":  filePath,
+	})
+	log.L(logCtx).Debugf("Starting file reconciler")
 
 	watcher, err := fsnotify.NewWatcher()
 	if err == nil {
-		go fsListenerLoop(ctx, fullFilePath, onChange, func() {
+		go fsListenerLoop(logCtx, fullFilePath, onChange, func() {
 			_ = watcher.Close()
 			if onClose != nil {
 				onClose()
@@ -61,8 +65,8 @@ func sync(ctx context.Context, fullFilePath string, onChange, onClose, onSync fu
 		err = watcher.Add(filePath)
 	}
 	if err != nil {
-		log.L(ctx).Errorf("Failed to start filesystem listener: %s", err)
-		return i18n.WrapError(ctx, err, i18n.MsgFailedToStartListener, err)
+		log.L(logCtx).Errorf("Failed to start filesystem listener: %s", err)
+		return i18n.WrapError(logCtx, err, i18n.MsgFailedToStartListener, err)
 	}
 	return nil
 }
@@ -78,6 +82,11 @@ func fsListenerLoop(ctx context.Context, fullFilePath string, onChange, onClose,
 		}()
 	}
 	log.L(ctx).Debugf("re-sync interval set to '%s'", *timeout)
+
+	// A single ticker gives a constant re-sync cadence regardless of how busy the watched
+	// directory is.
+	resyncTicker := time.NewTicker(*timeout)
+	defer resyncTicker.Stop()
 
 	var lastHash *fftypes.Bytes32
 	for {
@@ -97,18 +106,18 @@ func fsListenerLoop(ctx context.Context, fullFilePath string, onChange, onClose,
 				if err == nil {
 					dataHash := fftypes.HashString(string(data))
 					if lastHash == nil || !dataHash.Equals(lastHash) {
-						log.L(ctx).Infof("Config file change detected. Event=%s Name=%s Size=%d Hash=%s", event.Op, fullFilePath, len(data), dataHash)
+						log.L(ctx).Infof("Config file change detected. Event=%s Size=%d Hash=%s", event.Op, len(data), dataHash)
 						onChange()
 					}
 					lastHash = dataHash
 				}
 			}
-		case <-time.After(*timeout):
+		case <-resyncTicker.C:
 			if onSync != nil {
 				data, err := os.ReadFile(fullFilePath)
 				if err == nil {
 					dataHash := fftypes.HashString(string(data))
-					log.L(ctx).Infof("Config file re-sync. Event=Resync Name=%s Size=%d Hash=%s", fullFilePath, len(data), dataHash)
+					log.L(ctx).Infof("Config file re-sync. Event=Resync Size=%d Hash=%s", len(data), dataHash)
 					onSync()
 				}
 			}

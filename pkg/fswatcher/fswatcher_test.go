@@ -109,3 +109,51 @@ func TestFileListenerLogError(t *testing.T) {
 	cancelCtx()
 	<-fsListenerDone
 }
+
+// A constant stream of fs events on the watched directory (arriving faster than the re-sync
+// interval) must not starve the re-sync.
+func TestFileListenerResyncNotStarvedByEvents(t *testing.T) {
+
+	logrus.SetLevel(logrus.DebugLevel)
+	tmpDir := t.TempDir()
+	filePath := fmt.Sprintf("%s/test.yaml", tmpDir)
+	assert.NoError(t, os.WriteFile(filePath, []byte(`{"ut_conf": "one"}`), 0664))
+
+	ctx, cancelCtx := context.WithCancel(context.Background())
+	events := make(chan fsnotify.Event)
+	fsListenerDone := make(chan struct{})
+	reSyncFired := make(chan struct{}, 1)
+	reSyncInterval := 200 * time.Millisecond
+	onChangeCount := 0
+	go fsListenerLoop(ctx, filePath, func() {
+		onChangeCount++
+	}, func() {
+		close(fsListenerDone)
+	}, func() {
+		select {
+		case reSyncFired <- struct{}{}:
+		default:
+		}
+	}, &reSyncInterval, events, make(chan error))
+
+	// Flood the loop with events on an unrelated file in the same directory, each well
+	// inside the re-sync interval, until the re-sync fires (or we give up)
+	deadline := time.After(5 * time.Second)
+	fired := false
+	for !fired {
+		select {
+		case events <- fsnotify.Event{Name: fmt.Sprintf("%s/other.tmp", tmpDir), Op: fsnotify.Write}:
+			time.Sleep(20 * time.Millisecond)
+		case <-reSyncFired:
+			fired = true
+		case <-deadline:
+			t.Fatal("re-sync never fired while events were flowing")
+		}
+	}
+
+	// The content never changed after the first read, so onChange fires at most once
+	assert.LessOrEqual(t, onChangeCount, 1)
+
+	cancelCtx()
+	<-fsListenerDone
+}
