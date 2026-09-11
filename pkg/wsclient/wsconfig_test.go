@@ -104,6 +104,15 @@ func TestWSConfigNetDialerCustom(t *testing.T) {
 	assert.Error(t, wsConfig.NetDialer.Control("tcp", "169.254.169.254:80", nil))
 }
 
+func TestWSConfigNetDialerFail(t *testing.T) {
+	resetConf()
+	utConf.SubSection("net").Set(ffnet.NetCIDRDenylist, []string{"not-a-cidr"})
+
+	ctx := context.Background()
+	_, err := GenerateConfig(ctx, utConf)
+	assert.Regexp(t, "FF00260", err)
+}
+
 func TestWSConfigTLSGenerationFail(t *testing.T) {
 	resetConf()
 
