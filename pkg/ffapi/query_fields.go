@@ -72,6 +72,20 @@ func (qf QueryFields) NewUpdate(ctx context.Context) UpdateBuilder {
 	}
 }
 
+// Resolve looks up a field by name, falling back to a case-insensitive match when there is no exact
+// one. The returned name is the one declared in the map.
+func (qf QueryFields) Resolve(fieldAnyCase string) (string, Field, bool) {
+	if f, ok := qf[fieldAnyCase]; ok {
+		return fieldAnyCase, f, true
+	}
+	for name, f := range qf {
+		if strings.EqualFold(name, fieldAnyCase) {
+			return name, f, true
+		}
+	}
+	return "", nil, false
+}
+
 func (qf QueryFields) Clone() QueryFields {
 	qf2 := make(QueryFields, len(qf))
 	for n, f := range qf {

@@ -426,6 +426,8 @@ func (f *baseFilter) Finalize() (fi *FilterInfo, err error) {
 	var values []FieldSerialization
 	var mods []FieldMod
 
+	resolvedField := f.field
+
 	switch f.op {
 	case FilterOpAnd, FilterOpOr:
 		children = make([]*FilterInfo, len(f.children))
@@ -437,11 +439,11 @@ func (f *baseFilter) Finalize() (fi *FilterInfo, err error) {
 	case FilterOpIn, FilterOpNotIn:
 		fValues := f.value.([]driver.Value)
 		values = make([]FieldSerialization, len(fValues))
-		name := strings.ToLower(f.field)
-		field, ok := f.fb.queryFields[name]
+		name, field, ok := f.fb.queryFields.Resolve(f.field)
 		if !ok {
-			return nil, i18n.NewError(f.fb.ctx, i18n.MsgInvalidFilterField, name)
+			return nil, i18n.NewError(f.fb.ctx, i18n.MsgInvalidFilterField, f.field)
 		}
+		resolvedField = name
 		mods = fieldMods(field)
 		for i, fv := range fValues {
 			values[i] = field.GetSerialization()
@@ -450,11 +452,11 @@ func (f *baseFilter) Finalize() (fi *FilterInfo, err error) {
 			}
 		}
 	default:
-		name := strings.ToLower(f.field)
-		field, ok := f.fb.queryFields[name]
+		name, field, ok := f.fb.queryFields.Resolve(f.field)
 		if !ok {
-			return nil, i18n.NewError(f.fb.ctx, i18n.MsgInvalidFilterField, name)
+			return nil, i18n.NewError(f.fb.ctx, i18n.MsgInvalidFilterField, f.field)
 		}
+		resolvedField = name
 		mods = fieldMods(field)
 		skipScan := false
 		switch f.value.(type) {
@@ -505,7 +507,7 @@ func (f *baseFilter) Finalize() (fi *FilterInfo, err error) {
 	return &FilterInfo{
 		Children:       children,
 		Op:             f.op,
-		Field:          f.field,
+		Field:          resolvedField,
 		FieldMods:      mods,
 		Values:         values,
 		Value:          value,
@@ -525,9 +527,9 @@ func (fb *filterBuilder) Sort(fields ...string) FilterBuilder {
 			field = strings.TrimPrefix(field, "-")
 			descending = true
 		}
-		if _, ok := fb.queryFields[field]; ok {
+		if name, _, ok := fb.queryFields.Resolve(field); ok {
 			fb.sort = append(fb.sort, &SortField{
-				Field:      field,
+				Field:      name,
 				Descending: descending,
 			})
 		}
@@ -542,8 +544,8 @@ func (f *baseFilter) Sort(fields ...string) Filter {
 
 func (fb *filterBuilder) GroupBy(fields ...string) FilterBuilder {
 	for _, field := range fields {
-		if _, ok := fb.queryFields[field]; ok {
-			fb.groupBy = append(fb.groupBy, field)
+		if name, _, ok := fb.queryFields.Resolve(field); ok {
+			fb.groupBy = append(fb.groupBy, name)
 		}
 	}
 	return fb
@@ -556,8 +558,8 @@ func (f *baseFilter) GroupBy(fields ...string) Filter {
 
 func (fb *filterBuilder) RequiredFields(fields ...string) FilterBuilder {
 	for _, field := range fields {
-		if _, ok := fb.queryFields[field]; ok {
-			fb.requiredFields = append(fb.requiredFields, field)
+		if name, _, ok := fb.queryFields.Resolve(field); ok {
+			fb.requiredFields = append(fb.requiredFields, name)
 		}
 	}
 	return fb
