@@ -87,6 +87,7 @@ type APIServerOptions[T any] struct {
 	VersionedAPIs                     *VersionedAPIs
 	MonitoringRoutes                  []*Route
 	EnrichRequest                     func(r *APIRequest) (T, error)
+	MapError                          func(ctx context.Context, err error) error // optional: applied to every error before its status is derived
 	Description                       string
 	APIConfig                         config.Section
 	MonitoringConfig                  config.Section
@@ -304,6 +305,7 @@ func (as *apiServer[T]) handlerFactory(logLevel logrus.Level) *HandlerFactory {
 		SupportFieldRedaction: as.SupportFieldRedaction,
 		AlwaysPaginate:        as.alwaysPaginate,
 		HandleYAML:            as.handleYAML,
+		MapError:              as.MapError,
 	}
 	hf.SetAPIEntryLoggingLevel(logLevel)
 	return hf
