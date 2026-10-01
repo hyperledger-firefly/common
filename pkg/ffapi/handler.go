@@ -78,6 +78,7 @@ type HandlerFactory struct {
 	SupportFieldRedaction bool
 	BasePath              string
 	BasePathParams        []*PathParam
+	MapError              func(ctx context.Context, err error) error // optional error mapping function, runs before status code extraction/setting
 
 	apiEntryLoggingLevel logrus.Level // the log level at which entry/exit logging is enabled at all (does not affect trace logging)
 }
@@ -396,6 +397,9 @@ func (hs *HandlerFactory) APIWrapper(handler HandlerFunction) http.HandlerFunc {
 		status, err := handler(res, req)
 		durationMS := float64(time.Since(startTime)) / float64(time.Millisecond)
 		if err != nil {
+			if hs.MapError != nil {
+				err = hs.MapError(ctx, err)
+			}
 			if ffe, ok := (interface{}(err)).(i18n.FFError); ok {
 				if logrus.IsLevelEnabled(logrus.DebugLevel) {
 					l.Debugf("%s:\n%s", ffe.Error(), ffe.StackTrace())
