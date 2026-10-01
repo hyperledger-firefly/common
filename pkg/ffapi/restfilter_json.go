@@ -17,10 +17,12 @@
 package ffapi
 
 import (
+	"bytes"
 	"context"
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"strconv"
 	"strings"
 
@@ -146,13 +148,24 @@ func SkipFieldValidation() *JSONBuildFilterOpt {
 
 func (js *SimpleFilterValue) UnmarshalJSON(b []byte) error {
 	var v interface{}
-	err := json.Unmarshal(b, &v)
+	d := json.NewDecoder(bytes.NewReader(b))
+	d.UseNumber()
+	err := d.Decode(&v)
 	if err != nil {
 		return err
 	}
 	switch vi := v.(type) {
-	case float64:
-		*js = (SimpleFilterValue)(strconv.FormatFloat(vi, 'f', -1, 64))
+	case json.Number:
+		// Parsed exactly (rather than as a float64) so large values such as a uint256 are not
+		// rounded, and bounded to 256 bits so an exponent cannot expand into an enormous string
+		if !boundedLiteral(vi.String()) {
+			return i18n.NewError(context.Background(), i18n.MsgJSONQueryValueUnsupported, string(b))
+		}
+		r, ok := new(big.Rat).SetString(vi.String()) // #nosec G113 - length and exponent bounded by boundedLiteral above
+		if !ok || r.Num().BitLen() > maxFilterNumberBits || r.Denom().BitLen() > maxFilterNumberBits {
+			return i18n.NewError(context.Background(), i18n.MsgJSONQueryValueUnsupported, string(b))
+		}
+		*js = (SimpleFilterValue)(formatDecimal(r))
 		return nil
 	case string:
 		*js = (SimpleFilterValue)(vi)
@@ -163,6 +176,40 @@ func (js *SimpleFilterValue) UnmarshalJSON(b []byte) error {
 	default:
 		return i18n.NewError(context.Background(), i18n.MsgJSONQueryValueUnsupported, string(b))
 	}
+}
+
+const (
+	maxFilterNumberBits   = 256
+	maxFilterNumberDigits = 78                                              // decimal digits in 2^256
+	maxFilterNumberLength = maxFilterNumberDigits + maxFilterNumberBits + 8 // integer digits, decimal places (2^-255 needs 255), sign, point and exponent
+)
+
+// boundedLiteral reports whether s, a valid JSON number, is short enough and has a small enough
+// exponent that the value might fit in maxFilterNumberBits.
+// Check before parsing to big.Rat (per gosec G113)
+func boundedLiteral(s string) bool {
+	if len(s) > maxFilterNumberLength {
+		return false
+	}
+	i := strings.IndexAny(s, "eE")
+	if i < 0 {
+		return true
+	}
+	exp, err := strconv.Atoi(s[i+1:])
+	limit := maxFilterNumberLength + maxFilterNumberDigits
+	return err == nil && exp >= -limit && exp <= limit
+}
+
+// formatDecimal renders r, which was parsed from a decimal literal, as a plain decimal with
+// no exponent and no trailing zeros (so "5.0" and "1e3" arrive as "5" and "1000")
+func formatDecimal(r *big.Rat) string {
+	if r.IsInt() {
+		return r.Num().String()
+	}
+	// The denominator is 2^a*5^b, which terminates within max(a,b) places - and BitLen
+	// is always at least that
+	s := r.FloatString(r.Denom().BitLen())
+	return strings.TrimRight(s, "0")
 }
 
 func (js SimpleFilterValue) String() string {
