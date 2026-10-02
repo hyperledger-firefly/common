@@ -26,6 +26,19 @@ import (
 	"github.com/hyperledger-firefly/common/pkg/i18n"
 )
 
+// PostgreSQLMaxPlaceholders is the limit on bind parameters in one statement, set by the PostgreSQL wire protocol
+const PostgreSQLMaxPlaceholders = 65535
+
+// DefaultPostgreSQLProviderFeatures are the features shared by PostgreSQL providers, which can add their own on top
+func DefaultPostgreSQLProviderFeatures() SQLFeatures {
+	features := DefaultSQLProviderFeatures()
+	features.PlaceholderFormat = sq.Dollar
+	features.MultiRowInsert = true
+	features.MaxPlaceholders = PostgreSQLMaxPlaceholders
+	features.DBOptimizedUpsertBuilder = BuildPostgreSQLOptimizedUpsert
+	return features
+}
+
 // BuildPostgreSQLOptimizedUpsert is a PostgreSQL helper to avoid implementing this lots of times in child packages
 func BuildPostgreSQLOptimizedUpsert(ctx context.Context, table string, idColumn string, insertCols, updateCols []string, returnCol string, values map[string]driver.Value) (insert sq.InsertBuilder, err error) {
 	insertValues := make([]interface{}, 0, len(insertCols))
