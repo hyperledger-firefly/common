@@ -160,7 +160,7 @@ type WSPostConnectHandler func(ctx context.Context, establishing WSClient) error
 //   - When cycling the connection (after the new connection is established, before post-connect is called)
 //
 // Passed a disconnecting WSConn handle that will route to the OLD connection.
-// You should not to use this connection beyond the scope of the callback.
+// You should not use this connection beyond the scope of the callback.
 type WSPreDisconnectHandler func(ctx context.Context, disconnecting WSClient) error
 
 // New creates a new outbound client that can be connected to a remote server.
