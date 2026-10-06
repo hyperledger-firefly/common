@@ -21,6 +21,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -776,4 +777,46 @@ func TestBuildQueryAndFail(t *testing.T) {
 
 	_, err = qf.BuildFilter(context.Background(), TestQueryFactory)
 	assert.Regexp(t, "FF00142.*color", err)
+}
+
+func TestSimpleFilterValueNumbers(t *testing.T) {
+	for in, expected := range map[string]string{
+		`9007199254740993`: "9007199254740993", // 2^53+1, not representable as a float64
+		`115792089237316195423570985008687907853269984665640564039457584007913129639935`: "115792089237316195423570985008687907853269984665640564039457584007913129639935", // 2^256-1
+		`-57896044618658097711785492504343953926634992332820282019728792003956564819968`: "-57896044618658097711785492504343953926634992332820282019728792003956564819968", // -2^255
+		`-12345678901234567890123`: "-12345678901234567890123",
+		`42`:                       "42",
+		`5.0`:                      "5",
+		`1e3`:                      "1000",
+		`1.5`:                      "1.5",
+		`-0.000123`:                "-0.000123",
+		`1.25e-2`:                  "0.0125",
+		`0.0009765625`:             "0.0009765625", // 1/1024 - more places than denominator digits
+		`9007199254740993e0`:       "9007199254740993",
+		`123456789012345678901.5`:  "123456789012345678901.5",
+		`1e30`:                     "1000000000000000000000000000000",
+		// 2^-255, the most decimal places a value within 256 bits can need
+		`0.000000000000000000000000000000000000000000000000000000000000000000000000000017272337110188889250772703725600799142232000728872562770047406940337183606324854115943015006944576453121094587892299327193990197893663893387306007554116149549372494220733642578125`: "0.000000000000000000000000000000000000000000000000000000000000000000000000000017272337110188889250772703725600799142232000728872562770047406940337183606324854115943015006944576453121094587892299327193990197893663893387306007554116149549372494220733642578125",
+		`true`:                     "true",
+		`"str"`:                    "str",
+	} {
+		var js SimpleFilterValue
+		err := json.Unmarshal([]byte(in), &js)
+		assert.NoError(t, err, in)
+		assert.Equal(t, expected, js.String(), in)
+	}
+
+	var js SimpleFilterValue
+	err := js.UnmarshalJSON([]byte(`115792089237316195423570985008687907853269984665640564039457584007913129639936`)) // 2^256
+	assert.Regexp(t, "FF00241", err)
+	err = js.UnmarshalJSON([]byte(`1e999999`))
+	assert.Regexp(t, "FF00241", err)
+	err = js.UnmarshalJSON([]byte(`1e99999999999999999999`)) // exponent overflows an int
+	assert.Regexp(t, "FF00241", err)
+	err = js.UnmarshalJSON([]byte(`1e80`)) // within the exponent bound, but over 256 bits
+	assert.Regexp(t, "FF00241", err)
+	err = js.UnmarshalJSON([]byte(strings.Repeat("9", 1_000_000))) // too long to parse
+	assert.Regexp(t, "FF00241", err)
+	err = js.UnmarshalJSON([]byte(`1e-400`))
+	assert.Regexp(t, "FF00241", err)
 }
