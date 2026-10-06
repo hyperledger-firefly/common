@@ -500,7 +500,7 @@ func (bc *connBoundClient) isRetired() bool {
 }
 
 func (bc *connBoundClient) Send(ctx context.Context, message []byte) error {
-	if bc.isRetired() {
+	if !bc.disableReconnect && bc.isRetired() {
 		log.L(ctx).Debugf("WS %s send on retired connection routed to current connection", bc.url)
 		return bc.wsClient.Send(ctx, message)
 	}
