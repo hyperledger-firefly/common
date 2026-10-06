@@ -152,7 +152,7 @@ type WSPreConnectHandler func(ctx context.Context, w WSClient) error
 
 // WSPostConnectHandler will be called after every connect/reconnect. Can send data over ws, but must not block listening for data on the ws.
 // During auto-cycle it is passed an establishing WSConn handle that will route to the NEW connection.
-// You should not to use this connection beyond the scope of the callback.
+// You should not use this connection beyond the scope of the callback.
 type WSPostConnectHandler func(ctx context.Context, establishing WSClient) error
 
 // WSPreDisconnectHandler is called before a graceful close, to allow cleanup (such as unsubscribe):
