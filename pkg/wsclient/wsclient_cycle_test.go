@@ -734,3 +734,56 @@ func TestConnBoundClientSendWriteTimeout(t *testing.T) {
 	err := w.boundTo(c).Send(ctx, []byte(`never written`))
 	assert.Regexp(t, "FF00146", err)
 }
+
+// A hook facade retained after its connection is gone falls back to the current connection,
+// so consumers that captured the afterConnect WSClient keep working across reconnects
+func TestConnBoundClientRetainedAcrossReconnect(t *testing.T) {
+	connections, url, _, done := NewTestWSServerMulti(nil)
+	defer done()
+
+	var retained atomic.Pointer[WSClient]
+	wsConfig := &WSConfig{
+		HTTPURL:      url,
+		InitialDelay: 5 * time.Millisecond,
+		MaximumDelay: 20 * time.Millisecond,
+		PostConnectHandler: func(ctx context.Context, w WSClient) error {
+			retained.CompareAndSwap(nil, &w) // keep the first connection's facade
+			return w.Send(ctx, []byte(`subscribe`))
+		},
+	}
+	wsc, err := NewWithConfig(context.Background(), wsConfig)
+	assert.NoError(t, err)
+	assert.NoError(t, wsc.Connect())
+	defer wsc.Close()
+
+	conn1 := nextConn(t, connections)
+	expectMsg(t, conn1, `subscribe`)
+	facade := *retained.Load()
+
+	// Still bound to conn1 while it is live
+	assert.NoError(t, facade.Send(context.Background(), []byte(`on conn1`)))
+	expectMsg(t, conn1, `on conn1`)
+
+	// Server drops conn1 - the client reconnects on conn2
+	conn1.CloseConn()
+	waitDone(t, conn1)
+	conn2 := nextConn(t, connections)
+	expectMsg(t, conn2, `subscribe`)
+
+	// The retained facade now routes via the shared client to conn2
+	assert.NoError(t, facade.Send(context.Background(), []byte(`after reconnect`)))
+	expectMsg(t, conn2, `after reconnect`)
+}
+
+func TestConnBoundClientUnpromotedStaysStrict(t *testing.T) {
+	w := &wsClient{
+		ctx:     context.Background(),
+		closing: make(chan struct{}),
+	}
+	// A connection that was torn down without ever being promoted (e.g. afterConnect failed
+	// during a cycle) must not leak sends onto the current connection
+	c := &wsConnection{w: w, send: make(chan *trackedSend), sendDone: make(chan []byte), promoted: make(chan struct{})}
+	close(c.sendDone)
+	err := w.boundTo(c).Send(context.Background(), []byte(`a`))
+	assert.Regexp(t, "FF00147", err)
+}

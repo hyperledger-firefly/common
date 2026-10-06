@@ -151,13 +151,17 @@ type wsClient struct {
 type WSPreConnectHandler func(ctx context.Context, w WSClient) error
 
 // WSPostConnectHandler will be called after every connect/reconnect. Can send data over ws, but must not block listening for data on the ws.
-// Note: During auto-cycle this is called on the new connection, after the WSPreDisconnectHandler is called on the old one, but before the old connection is closed.
-type WSPostConnectHandler func(ctx context.Context, w WSClient) error
+// During auto-cycle it is passed an establishing WSConn handle that will route to the NEW connection.
+// You should not use this connection beyond the scope of the callback.
+type WSPostConnectHandler func(ctx context.Context, establishing WSClient) error
 
 // WSPreDisconnectHandler is called before a graceful close, to allow cleanup (such as unsubscribe):
 //   - When closed explicitly
 //   - When cycling the connection (after the new connection is established, before post-connect is called)
-type WSPreDisconnectHandler func(ctx context.Context, w WSClient) error
+//
+// Passed a disconnecting WSConn handle that will route to the OLD connection.
+// You should not use this connection beyond the scope of the callback.
+type WSPreDisconnectHandler func(ctx context.Context, disconnecting WSClient) error
 
 // New creates a new outbound client that can be connected to a remote server.
 // ** Recommend using NewWithConfig directly **
@@ -480,7 +484,26 @@ type connBoundClient struct {
 	c *wsConnection
 }
 
+func (bc *connBoundClient) isRetired() bool {
+	// Selecting on sendDone/default gets compiled down to an efficient `runtime.selectnbrecv`,
+	// so it's acceptable overhead on the Send() critical path.
+	select {
+	case <-bc.c.sendDone:
+		select {
+		case <-bc.c.promoted:
+			return true
+		default:
+		}
+	default:
+	}
+	return false
+}
+
 func (bc *connBoundClient) Send(ctx context.Context, message []byte) error {
+	if !bc.disableReconnect && bc.isRetired() {
+		log.L(ctx).Debugf("WS %s send on retired connection routed to current connection", bc.url)
+		return bc.wsClient.Send(ctx, message)
+	}
 	if err := bc.waitRateLimiter(ctx); err != nil {
 		return err
 	}
