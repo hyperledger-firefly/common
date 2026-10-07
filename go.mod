@@ -10,7 +10,7 @@ require (
 	github.com/aidarkhanov/nanoid v1.0.8
 	github.com/docker/go-units v0.5.0
 	github.com/fsnotify/fsnotify v1.7.0
-	github.com/getkin/kin-openapi v0.144.0
+	github.com/getkin/kin-openapi v0.149.1-0.20260916155425-4d3b0c3ed557
 	github.com/ghodss/yaml v1.0.0
 	github.com/go-resty/resty/v2 v2.11.0
 	github.com/golang-migrate/migrate/v4 v4.17.0
@@ -68,7 +68,7 @@ require (
 	github.com/prometheus/procfs v0.12.0 // indirect
 	github.com/sagikazarmark/locafero v0.4.0 // indirect
 	github.com/sagikazarmark/slog-shim v0.1.0 // indirect
-	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 // indirect
 	github.com/sourcegraph/conc v0.3.0 // indirect
 	github.com/spf13/afero v1.11.0 // indirect
 	github.com/spf13/cast v1.6.0 // indirect
