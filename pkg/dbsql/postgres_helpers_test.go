@@ -21,6 +21,7 @@ import (
 	"database/sql/driver"
 	"testing"
 
+	sq "github.com/Masterminds/squirrel"
 	"github.com/hyperledger-firefly/common/pkg/fftypes"
 	"github.com/stretchr/testify/assert"
 )
@@ -58,5 +59,15 @@ func TestBuildPostgreSQLOptimizedUpsertFail(t *testing.T) {
 
 	_, err := BuildPostgreSQLOptimizedUpsert(context.Background(), "", "", []string{}, []string{}, "", map[string]driver.Value{})
 	assert.Regexp(t, "FF00247", err)
+
+}
+
+func TestDefaultPostgreSQLProviderFeatures(t *testing.T) {
+
+	features := DefaultPostgreSQLProviderFeatures()
+	assert.Equal(t, sq.Dollar, features.PlaceholderFormat)
+	assert.True(t, features.MultiRowInsert)
+	assert.Equal(t, 65535, features.MaxPlaceholders)
+	assert.NotNil(t, features.DBOptimizedUpsertBuilder)
 
 }
