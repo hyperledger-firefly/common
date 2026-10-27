@@ -106,6 +106,11 @@ func (hs *HandlerFactory) getFilePart(req *http.Request) (*multipartState, error
 	}
 	for {
 		part, err := mpr.NextPart()
+		// Not errors.Is: NextPart returns a bare io.EOF only at the final boundary, while a
+		// truncated body comes back wrapped and should keep the FF00161 read error
+		if err == io.EOF {
+			return nil, i18n.NewError(ctx, i18n.MsgMultiPartFormNoFile)
+		}
 		if err != nil {
 			return nil, i18n.WrapError(ctx, err, i18n.MsgMultiPartFormReadError)
 		}
