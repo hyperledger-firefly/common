@@ -17,6 +17,9 @@
 package ffapi
 
 import (
+	"encoding/json"
+	"math/big"
+
 	"github.com/hyperledger-firefly/common/pkg/fftypes"
 )
 
@@ -121,6 +124,18 @@ func toSimpleValue(v any) SimpleFilterValue {
 	switch vt := v.(type) {
 	case string:
 		return SimpleFilterValue(vt)
+	case json.Number:
+		return SimpleFilterValue(vt)
+	case *big.Int:
+		if vt == nil {
+			return ""
+		}
+		return SimpleFilterValue(vt.String())
+	case *fftypes.FFBigInt:
+		if vt == nil {
+			return ""
+		}
+		return SimpleFilterValue(vt.String())
 	default:
 		// As the interface requires everything to be a string, we try and support a range
 		// of values using existing functions. Could be improved in the future.
