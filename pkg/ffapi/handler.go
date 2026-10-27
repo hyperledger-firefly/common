@@ -372,11 +372,9 @@ func (hs *HandlerFactory) APIWrapper(handler HandlerFunction) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
 		reqTimeout := hs.getTimeout(req)
 		ctx, cancel := context.WithTimeout(req.Context(), reqTimeout)
-		httpReqID := req.Header.Get(RequestIDHeader())
-		if httpReqID == "" {
-			httpReqID = fftypes.ShortID()
-		}
+		httpReqID, traceContext := RequestContextFromHeaders(req.Header)
 		ctx = withRequestID(ctx, httpReqID)
+		ctx = withTraceContext(ctx, traceContext)
 		ctx = withPassthroughHeaders(ctx, req, hs.PassthroughHeaders)
 		ctx = log.WithLogFields(ctx, "httpreq", httpReqID)
 
@@ -453,4 +451,11 @@ func withPassthroughHeaders(ctx context.Context, req *http.Request, passthroughH
 
 func withRequestID(ctx context.Context, requestID string) context.Context {
 	return context.WithValue(ctx, CtxFFRequestIDKey{}, requestID)
+}
+
+func withTraceContext(ctx context.Context, tc *TraceContext) context.Context {
+	if tc == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, CtxTraceContextKey{}, tc)
 }

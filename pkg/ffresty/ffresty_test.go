@@ -541,6 +541,12 @@ func TestPassthroughHeaders(t *testing.T) {
 	passthroughHeaders.Set("X-Custom-Header", "custom value")
 	ctx := context.WithValue(context.Background(), ffapi.CtxHeadersKey{}, passthroughHeaders)
 	ctx = context.WithValue(ctx, ffapi.CtxFFRequestIDKey{}, "customReqID")
+	ctx = context.WithValue(ctx, ffapi.CtxTraceContextKey{}, &ffapi.TraceContext{
+		TraceID:    "4bf92f3577b34da6a3ce929d0e0e4736",
+		ParentID:   "00f067aa0ba902b7",
+		Flags:      "01",
+		TraceState: "dd=s:1",
+	})
 
 	customClient := &http.Client{}
 
@@ -563,6 +569,8 @@ func TestPassthroughHeaders(t *testing.T) {
 	httpmock.RegisterResponder("GET", "http://localhost:12345/test",
 		func(req *http.Request) (*http.Response, error) {
 			assert.Equal(t, "customReqID", req.Header.Get(ffapi.RequestIDHeader()))
+			assert.Equal(t, "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", req.Header.Get(ffapi.TraceParentHeader))
+			assert.Equal(t, "dd=s:1", req.Header.Get(ffapi.TraceStateHeader))
 			assert.Equal(t, "headervalue", req.Header.Get("someheader"))
 			assert.Equal(t, "custom value", req.Header.Get("X-Custom-Header"))
 			assert.Equal(t, "Basic dXNlcjpwYXNz", req.Header.Get("Authorization"))

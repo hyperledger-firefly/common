@@ -317,10 +317,12 @@ func NewWithConfig(ctx context.Context, ffrestyConfig Config) (client *resty.Cli
 			}
 		}
 
-		// If an X-FireFlyRequestID was set on the context, pass that header on this request too
+		// If a request ID was set on the context, pass that header on this request too,
+		// along with the W3C trace context headers when there is a trace context
 		ffRequestID := rCtx.Value(ffapi.CtxFFRequestIDKey{})
 		if ffRequestID != nil {
-			req.Header.Set(ffapi.RequestIDHeader(), ffRequestID.(string))
+			traceContext, _ := rCtx.Value(ffapi.CtxTraceContextKey{}).(*ffapi.TraceContext)
+			ffapi.SetRequestContextHeaders(req.Header, ffRequestID.(string), traceContext)
 		}
 
 		if ffrestyConfig.OnBeforeRequest != nil {
